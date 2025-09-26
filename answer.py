@@ -10,7 +10,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException
+from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from webdriver_manager.chrome import ChromeDriverManager
 from telethon import TelegramClient, events
 from telegram import Bot
@@ -19,7 +19,7 @@ import tempfile
 # ---------------- CONFIG ----------------
 API_ID, API_HASH = 21882740, "c80a68894509d01a93f5acfeabfdd922"
 ALERT_BOT_TOKEN, ALERT_CHAT_ID = "6566504110:AAFK9hA4jxZ0eA7KZGhVvPe8mL2HZj2tQmE", 1168962519
-HEADLESS = True  # Для VPS лучше True
+HEADLESS = True  # Для VPS
 
 LOGIN_URL = "https://freelancehunt.com/ua/profile/login"
 LOGIN_DATA = {"login": "Vlari", "password": "Gvadiko_2004"}
@@ -52,6 +52,7 @@ def create_driver():
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-dev-shm-usage")
     opts.add_argument("--window-size=1366,900")
+    opts.add_argument("--disable-blink-features=AutomationControlled")
     if HEADLESS:
         opts.add_argument("--headless=new")
     opts.add_argument(f"--user-data-dir={tmp_profile()}")
@@ -62,13 +63,6 @@ def create_driver():
     drv.set_page_load_timeout(60)
     log(f"Chrome готов, HEADLESS={HEADLESS}")
     return drv
-
-def wait_body(timeout=20):
-    try:
-        WebDriverWait(driver, timeout).until(EC.presence_of_element_located((By.TAG_NAME,"body")))
-        time.sleep(0.3)
-    except TimeoutException:
-        log("Таймаут загрузки страницы")
 
 def human_type(el, text, delay=(0.03,0.08)):
     for ch in text:
@@ -110,16 +104,23 @@ def logged_in():
 # ---------------- LOGIN ----------------
 def login():
     driver.get(LOGIN_URL)
-    wait_body()
+    try:
+        # Ждём, пока форма логина полностью загрузится
+        WebDriverWait(driver, 15).until(
+            EC.presence_of_element_located((By.ID, "login-0"))
+        )
+    except TimeoutException:
+        log("Страница логина не загрузилась")
+        return False
+
+    # Пробуем загрузить cookies
     load_cookies()
     if logged_in():
         log("Уже авторизован")
         return True
 
     try:
-        login_input = WebDriverWait(driver, 15).until(
-            EC.presence_of_element_located((By.ID, "login-0"))
-        )
+        login_input = driver.find_element(By.ID, "login-0")
         password_input = driver.find_element(By.ID, "password-0")
         submit_btn = driver.find_element(By.ID, "save-0")
 
@@ -129,6 +130,7 @@ def login():
         password_input.send_keys(LOGIN_DATA["password"])
         submit_btn.click()
 
+        # Ждём, пока кнопка профиля появится
         WebDriverWait(driver, 15).until(
             EC.presence_of_element_located((By.CSS_SELECTOR,"a[href='/profile']"))
         )
@@ -152,54 +154,44 @@ async def make_bid(url):
     try:
         log(f"Открываю: {url}")
         driver.get(url)
-        wait_body()
-        load_cookies()
-        if not logged_in(): login(); driver.get(url); wait_body()
 
-        # проверка "ставка уже сделана"
+        # Ждём полной загрузки кнопки "Сделать ставку"
         try:
-            alert_el = driver.find_element(By.CSS_SELECTOR,"div.alert.alert-info")
-            text = alert_el.text
-            log(f"Ставка уже сделана: {text}")
-            await send_alert(f"⚠️ Уже сделано: {url}\n{text}")
-            return
-        except: pass
-
-        # клик "Сделать ставку"
-        try:
-            add_bid_btn = WebDriverWait(driver,5).until(
-                EC.element_to_be_clickable((By.ID,"add-bid"))
+            WebDriverWait(driver, 20).until(
+                EC.presence_of_element_located((By.ID, "add-bid"))
             )
-            driver.execute_script("arguments[0].click();", add_bid_btn)
-            log("Кликнули 'Сделать ставку'")
-            time.sleep(0.5)
-            human_scroll()
-        except:
-            log("Кнопка 'Сделать ставку' не найдена")
+        except TimeoutException:
+            log("Кнопка 'Сделать ставку' не найдена после ожидания")
+            await send_alert(f"⚠️ Кнопка 'Сделать ставку' не найдена: {url}")
             return
 
-        # заполнение полей
-        try:
-            amount_input = WebDriverWait(driver,5).until(EC.presence_of_element_located((By.ID,"amount-0")))
-            days_input = driver.find_element(By.ID,"days_to_deliver-0")
-            comment_input = driver.find_element(By.ID,"comment-0")
+        load_cookies()
+        if not logged_in():
+            login()
+            driver.get(url)
+            WebDriverWait(driver, 15).until(
+                EC.presence_of_element_located((By.ID, "add-bid"))
+            )
 
-            human_type(amount_input, DEFAULT_AMOUNT)
-            human_type(days_input, DEFAULT_DAYS)
-            human_type(comment_input, COMMENT_TEXT)
-        except Exception as e:
-            log(f"Ошибка заполнения полей: {e}")
-            return
+        add_bid_btn = driver.find_element(By.ID, "add-bid")
+        driver.execute_script("arguments[0].click();", add_bid_btn)
+        log("Кликнули 'Сделать ставку'")
+        human_scroll()
 
-        # клик "Добавить"
-        try:
-            add_btn = driver.find_element(By.ID,"add-0")
-            driver.execute_script("arguments[0].click();", add_btn)
-            log("Ставка отправлена!")
-            await send_alert(f"✅ Ставка отправлена: {url}")
-            save_cookies()
-        except Exception as e:
-            log(f"Ошибка клика 'Добавить': {e}")
+        # Заполняем поля
+        amount_input = WebDriverWait(driver,5).until(EC.presence_of_element_located((By.ID,"amount-0")))
+        days_input = driver.find_element(By.ID,"days_to_deliver-0")
+        comment_input = driver.find_element(By.ID,"comment-0")
+
+        human_type(amount_input, DEFAULT_AMOUNT)
+        human_type(days_input, DEFAULT_DAYS)
+        human_type(comment_input, COMMENT_TEXT)
+
+        add_btn = driver.find_element(By.ID,"add-0")
+        driver.execute_script("arguments[0].click();", add_btn)
+        log("Ставка отправлена!")
+        await send_alert(f"✅ Ставка отправлена: {url}")
+        save_cookies()
 
     except Exception as e:
         log(f"Ошибка make_bid: {e}")
@@ -209,11 +201,9 @@ async def make_bid(url):
 def extract_links_from_telegram(msg):
     links = []
 
-    # ссылки в тексте
     text = getattr(msg, "message", "") or ""
     links += re.findall(r"https?://[^\s)]+", text)
 
-    # ссылки в inline-кнопках
     try:
         buttons = getattr(msg, "buttons", [])
         for row in buttons:
@@ -237,7 +227,6 @@ async def on_msg(event):
 async def main():
     global driver
     driver = create_driver()
-    load_cookies()
     await tg_client.start()
     log("Telegram клиент запущен")
     await tg_client.run_until_disconnected()
