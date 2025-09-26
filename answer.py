@@ -24,7 +24,7 @@ from twocaptcha import TwoCaptcha
 # ------------------ CONFIG ------------------
 API_ID = int(os.getenv("API_ID", "21882740"))
 API_HASH = os.getenv("API_HASH", "c80a68894509d01a93f5acfeabfdd922")
-ALERT_BOT_TOKEN = os.getenv("ALERT_BOT_TOKEN", "")
+ALERT_BOT_TOKEN = os.getenv("ALERT_BOT_TOKEN", "6566504110:AAFK9hA4jxZ0eA7KZGhVvPe8mL2HZj2tQmE")
 ALERT_CHAT_ID = int(os.getenv("ALERT_CHAT_ID", "1168962519"))
 FH_LOGIN = os.getenv("FH_LOGIN", "Vlari")
 FH_PASSWORD = os.getenv("FH_PASSWORD", "Gvadiko_2004")
