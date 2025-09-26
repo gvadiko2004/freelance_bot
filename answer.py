@@ -10,16 +10,18 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException, NoSuchElementException
+from selenium.common.exceptions import TimeoutException
 from webdriver_manager.chrome import ChromeDriverManager
 from telethon import TelegramClient, events
 from telegram import Bot
 import tempfile
+from twocaptcha import TwoCaptcha
 
 # ---------------- CONFIG ----------------
 API_ID, API_HASH = 21882740, "c80a68894509d01a93f5acfeabfdd922"
 ALERT_BOT_TOKEN, ALERT_CHAT_ID = "6566504110:AAFK9hA4jxZ0eA7KZGhVvPe8mL2HZj2tQmE", 1168962519
 HEADLESS = True  # Для VPS
+CAPTCHA_API_KEY = "898059857fb8c709ca5c9613d44ffae4"
 
 LOGIN_URL = "https://freelancehunt.com/ua/profile/login"
 LOGIN_DATA = {"login": "Vlari", "password": "Gvadiko_2004"}
@@ -38,6 +40,7 @@ KEYWORDS = [k.lower() for k in [
 alert_bot = Bot(token=ALERT_BOT_TOKEN)
 tg_client = TelegramClient("session", API_ID, API_HASH)
 driver = None
+solver = TwoCaptcha(CAPTCHA_API_KEY)
 
 # ---------------- UTILS ----------------
 def log(msg):
@@ -101,11 +104,25 @@ def logged_in():
         return True
     except: return False
 
+# ---------------- CAPTCHA ----------------
+def solve_recaptcha():
+    """Используем 2Captcha для решения reCAPTCHA v2"""
+    try:
+        site_key = driver.find_element(By.CLASS_NAME, "g-recaptcha").get_attribute("data-sitekey")
+        url = driver.current_url
+        result = solver.recaptcha(sitekey=site_key, url=url)
+        token = result.get("code")
+        driver.execute_script(f'document.getElementById("g-recaptcha-response").innerHTML="{token}";')
+        log("CAPTCHA решена")
+        return True
+    except Exception as e:
+        log(f"Ошибка решения CAPTCHA: {e}")
+        return False
+
 # ---------------- LOGIN ----------------
 def login():
     driver.get(LOGIN_URL)
     try:
-        # Ждём, пока форма логина полностью загрузится
         WebDriverWait(driver, 15).until(
             EC.presence_of_element_located((By.ID, "login-0"))
         )
@@ -113,7 +130,6 @@ def login():
         log("Страница логина не загрузилась")
         return False
 
-    # Пробуем загрузить cookies
     load_cookies()
     if logged_in():
         log("Уже авторизован")
@@ -128,9 +144,15 @@ def login():
         login_input.send_keys(LOGIN_DATA["login"])
         password_input.clear()
         password_input.send_keys(LOGIN_DATA["password"])
+
+        # Решаем reCAPTCHA, если есть
+        try:
+            if driver.find_elements(By.CLASS_NAME, "g-recaptcha"):
+                solve_recaptcha()
+        except: pass
+
         submit_btn.click()
 
-        # Ждём, пока кнопка профиля появится
         WebDriverWait(driver, 15).until(
             EC.presence_of_element_located((By.CSS_SELECTOR,"a[href='/profile']"))
         )
@@ -155,7 +177,6 @@ async def make_bid(url):
         log(f"Открываю: {url}")
         driver.get(url)
 
-        # Ждём полной загрузки кнопки "Сделать ставку"
         try:
             WebDriverWait(driver, 20).until(
                 EC.presence_of_element_located((By.ID, "add-bid"))
@@ -178,7 +199,6 @@ async def make_bid(url):
         log("Кликнули 'Сделать ставку'")
         human_scroll()
 
-        # Заполняем поля
         amount_input = WebDriverWait(driver,5).until(EC.presence_of_element_located((By.ID,"amount-0")))
         days_input = driver.find_element(By.ID,"days_to_deliver-0")
         comment_input = driver.find_element(By.ID,"comment-0")
@@ -200,10 +220,8 @@ async def make_bid(url):
 # ---------------- TELEGRAM ----------------
 def extract_links_from_telegram(msg):
     links = []
-
     text = getattr(msg, "message", "") or ""
     links += re.findall(r"https?://[^\s)]+", text)
-
     try:
         buttons = getattr(msg, "buttons", [])
         for row in buttons:
@@ -212,7 +230,6 @@ def extract_links_from_telegram(msg):
                 if url and "freelancehunt.com" in url:
                     links.append(url)
     except: pass
-
     return list(set(links))
 
 @tg_client.on(events.NewMessage)
