@@ -10,15 +10,16 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException, NoSuchElementException
+from selenium.common.exceptions import TimeoutException
 from webdriver_manager.chrome import ChromeDriverManager
 from telethon import TelegramClient, events
 from telegram import Bot
+import tempfile
 
 # ---------------- CONFIG ----------------
 API_ID, API_HASH = 21882740, "c80a68894509d01a93f5acfeabfdd922"
 ALERT_BOT_TOKEN, ALERT_CHAT_ID = "6566504110:AAFK9hA4jxZ0eA7KZGhVvPe8mL2HZj2tQmE", 1168962519
-HEADLESS = False
+HEADLESS = True  # Для VPS лучше True
 
 LOGIN_URL = "https://freelancehunt.com/ua/profile/login"
 LOGIN_DATA = {"login": "Vlari", "password": "Gvadiko_2004"}
@@ -43,8 +44,7 @@ def log(msg):
     print(f"[ЛОГ] {msg}")
 
 def tmp_profile():
-    tmp = f"/tmp/chrome-{int(time.time())}-{random.randint(0,9999)}"
-    Path(tmp).mkdir(parents=True, exist_ok=True)
+    tmp = tempfile.mkdtemp(prefix="chrome-")
     return tmp
 
 def create_driver():
@@ -52,10 +52,12 @@ def create_driver():
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-dev-shm-usage")
     opts.add_argument("--window-size=1366,900")
-    if HEADLESS: opts.add_argument("--headless=new")
+    if HEADLESS:
+        opts.add_argument("--headless=new")
     opts.add_argument(f"--user-data-dir={tmp_profile()}")
     opts.add_experimental_option("excludeSwitches", ["enable-automation"])
     opts.add_experimental_option("useAutomationExtension", False)
+    
     drv = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=opts)
     drv.set_page_load_timeout(60)
     log(f"Chrome готов, HEADLESS={HEADLESS}")
@@ -226,7 +228,6 @@ def extract_links_from_telegram(msg):
 @tg_client.on(events.NewMessage)
 async def on_msg(event):
     txt = (event.message.text or "").lower()
-    # Если в тексте есть ключевые слова
     if any(k in txt for k in KEYWORDS):
         links = extract_links_from_telegram(event.message)
         for link in links:
@@ -246,4 +247,5 @@ if __name__=="__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         log("Завершение работы")
-        driver.quit()
+        if driver:
+            driver.quit()
