@@ -26,9 +26,9 @@ API_ID = int(os.getenv("API_ID", "21882740"))
 API_HASH = os.getenv("API_HASH", "c80a68894509d01a93f5acfeabfdd922")
 ALERT_BOT_TOKEN = os.getenv("ALERT_BOT_TOKEN", "")
 ALERT_CHAT_ID = int(os.getenv("ALERT_CHAT_ID", "1168962519"))
-FH_LOGIN = os.getenv("FH_LOGIN", "")
-FH_PASSWORD = os.getenv("FH_PASSWORD", "")
-CAPTCHA_API_KEY = os.getenv("CAPTCHA_API_KEY", "")
+FH_LOGIN = os.getenv("FH_LOGIN", "Vlari")
+FH_PASSWORD = os.getenv("FH_PASSWORD", "Gvadiko_2004")
+CAPTCHA_API_KEY = os.getenv("CAPTCHA_API_KEY", "898059857fb8c709ca5c9613d44ffae4")
 
 HEADLESS = False
 LOGIN_URL = "https://freelancehunt.com/ua/profile/login"
