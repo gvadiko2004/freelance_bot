@@ -204,27 +204,31 @@ async def make_bid(url):
         await send_alert(f"❌ Ошибка ставки: {e}\n{url}")
 
 # ---------------- TELEGRAM ----------------
-def extract_links(msg):
-    text = msg.message if hasattr(msg,"message") else str(msg)
-    links = re.findall(r"https?://[^\s)]+", text)
+def extract_links_from_telegram(msg):
+    links = []
 
-    # Добавляем ссылки из inline-кнопок Telegram
+    # ссылки в тексте
+    text = getattr(msg, "message", "") or ""
+    links += re.findall(r"https?://[^\s)]+", text)
+
+    # ссылки в inline-кнопках
     try:
-        for row in getattr(msg,"buttons",[]) or []:
+        buttons = getattr(msg, "buttons", [])
+        for row in buttons:
             for btn in row:
-                url = getattr(btn,"url",None)
+                url = getattr(btn, "url", None)
                 if url and "freelancehunt.com" in url:
                     links.append(url)
     except: pass
 
-    return list(set(links))  # убираем дубликаты
+    return list(set(links))
 
 @tg_client.on(events.NewMessage)
 async def on_msg(event):
     txt = (event.message.text or "").lower()
-    links = extract_links(event.message)
-    # Если в тексте есть ключевые слова и ссылки на проекты
-    if links and any(k in txt for k in KEYWORDS):
+    # Если в тексте есть ключевые слова
+    if any(k in txt for k in KEYWORDS):
+        links = extract_links_from_telegram(event.message)
         for link in links:
             asyncio.create_task(make_bid(link))
 
