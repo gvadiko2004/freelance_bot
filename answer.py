@@ -9,12 +9,12 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException
+from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from webdriver_manager.chrome import ChromeDriverManager
 from telethon import TelegramClient, events
 from telegram import Bot
 
-# -------- CONFIG --------
+# ---------------- CONFIG ----------------
 API_ID, API_HASH = 21882740, "c80a68894509d01a93f5acfeabfdd922"
 ALERT_BOT_TOKEN, ALERT_CHAT_ID = "6566504110:AAFK9hA4jxZ0eA7KZGhVvPe8mL2HZj2tQmE", 1168962519
 HEADLESS = False
@@ -28,20 +28,21 @@ KEYWORDS = [k.lower() for k in [
 ]]
 url_regex = re.compile(r"https?://[^\s)]+", re.IGNORECASE)
 
-# -------- INIT --------
+# ---------------- INIT ----------------
 alert_bot = Bot(token=ALERT_BOT_TOKEN)
 tg_client = TelegramClient("session", API_ID, API_HASH)
 
-# -------- LOG --------
-def log(msg): print(f"[ЛОГ] {msg}")
+# ---------------- LOG ----------------
+def log(msg):
+    print(f"[ЛОГ] {msg}")
 
-# -------- CHROME --------
+# ---------------- SELENIUM ----------------
 def tmp_profile():
     tmp = f"/tmp/chrome-{int(time.time())}-{random.randint(0,9999)}"
     Path(tmp).mkdir(parents=True, exist_ok=True)
     return tmp
 
-def driver_create():
+def create_driver():
     opts = Options()
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-dev-shm-usage")
@@ -55,7 +56,7 @@ def driver_create():
     log(f"Chrome готов, HEADLESS={HEADLESS}")
     return drv
 
-driver = driver_create()
+driver = create_driver()
 
 def wait_body(timeout=20):
     try:
@@ -64,8 +65,7 @@ def wait_body(timeout=20):
     except TimeoutException:
         log("Таймаут загрузки страницы")
 
-# -------- UTILS --------
-def human_type(el, txt, delay=(0.04,0.12)):
+def human_type(el, txt, delay=(0.03,0.1)):
     for ch in txt:
         el.send_keys(ch)
         time.sleep(random.uniform(*delay))
@@ -77,10 +77,12 @@ def human_scroll():
         driver.execute_script("window.scrollTo(0, document.body.scrollHeight*0.6);")
     except: pass
 
+# ---------------- COOKIES ----------------
 def save_cookies():
     try:
         with open(COOKIES_FILE,"wb") as f:
             pickle.dump(driver.get_cookies(),f)
+        log("Куки сохранены")
     except: pass
 
 def load_cookies():
@@ -93,6 +95,7 @@ def load_cookies():
         return True
     except: return False
 
+# ---------------- LOGIN ----------------
 def logged_in():
     try:
         driver.find_element(By.CSS_SELECTOR,"a[href='/profile']")
@@ -117,46 +120,45 @@ def login():
         log(f"Ошибка авторизации: {e}")
         return False
 
-# -------- ALERT --------
+# ---------------- ALERT ----------------
 async def send_alert(msg):
     try:
         await alert_bot.send_message(chat_id=ALERT_CHAT_ID,text=msg)
         log(f"TG ALERT: {msg}")
     except: pass
 
-# -------- BID --------
+# ---------------- BID ----------------
 async def make_bid(url):
     try:
         driver.get(url)
         wait_body()
         load_cookies()
         if not logged_in(): login(); driver.get(url); wait_body()
+        human_scroll()
 
-        # Проверка, была ли уже ставка
+        # Проверка уже сделанной ставки
         try:
             alert_el = driver.find_element(By.CSS_SELECTOR,"div.alert.alert-info")
-            text = alert_el.text
-            log(f"Ставка уже сделана: {text}")
-            await send_alert(f"⚠️ Уже сделано: {url}\n{text}")
+            log(f"Ставка уже сделана: {alert_el.text}")
+            await send_alert(f"⚠️ Уже сделано: {url}\n{alert_el.text}")
             return
         except: pass
 
-        human_scroll()
-        # Заполняем форму ставки
+        # Заполняем форму
         try:
             driver.find_element(By.ID,"amount-0").clear()
-            driver.find_element(By.ID,"amount-0").send_keys("12000")  # пример суммы
+            driver.find_element(By.ID,"amount-0").send_keys("12000")
             driver.find_element(By.ID,"days_to_deliver-0").clear()
-            driver.find_element(By.ID,"days_to_deliver-0").send_keys("3")  # пример дней
+            driver.find_element(By.ID,"days_to_deliver-0").send_keys("3")
             driver.find_element(By.ID,"comment-0").clear()
-            human_type(driver.find_element(By.ID,"comment-0"), COMMENT_TEXT, (0.02,0.07))
+            human_type(driver.find_element(By.ID,"comment-0"), COMMENT_TEXT)
             time.sleep(0.5)
         except Exception as e:
             log(f"Ошибка заполнения формы: {e}")
             await send_alert(f"❌ Ошибка заполнения формы: {url}")
             return
 
-        # JS-клик на кнопку Добавить
+        # JS клик на кнопку "Добавить"
         try:
             driver.execute_script("document.getElementById('add-0').click();")
             log("Кнопка 'Добавить' нажата")
@@ -165,15 +167,15 @@ async def make_bid(url):
         except Exception as e:
             log(f"Не удалось кликнуть 'Добавить': {e}")
             await send_alert(f"❌ Не удалось кликнуть 'Добавить': {url}")
+
     except Exception as e:
         log(f"Ошибка make_bid: {e}")
         await send_alert(f"❌ Ошибка ставки: {url}\n{e}")
 
-# -------- TELEGRAM --------
+# ---------------- TELEGRAM ----------------
 def extract_links(msg):
     text = msg.message if hasattr(msg, "message") else str(msg)
     links = re.findall(url_regex,text)
-    # ссылки из кнопок
     try:
         for row in getattr(msg,"buttons",[]) or []:
             for btn in row:
@@ -190,7 +192,7 @@ async def on_msg(event):
         for link in links:
             asyncio.create_task(make_bid(link))
 
-# -------- MAIN --------
+# ---------------- MAIN ----------------
 async def main():
     if os.path.exists(COOKIES_FILE):
         driver.get("https://freelancehunt.com")
