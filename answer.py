@@ -9,7 +9,6 @@ from dotenv import load_dotenv
 import aiohttp
 
 from telethon import TelegramClient, events
-from telethon.tl.types import MessageMediaWebPage, MessageEntityUrl, KeyboardButtonUrl
 from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
 
 # ---------- CONFIG ----------
@@ -101,15 +100,18 @@ async def process_fh_link(link: str):
 
         try:
             # Navigate to project page and wait until fully loaded
-            await page.goto(link, wait_until="networkidle", timeout=30000)
+            await page.goto(link, wait_until="networkidle", timeout=45000)
             logger.info("Страница полностью загружена.")
 
             # Check for register/login page
             reg_selector = 'a.with-tooltip.btn.btn-primary.btn-md.bottom-margin[href^="https://freelancehunt.com/ua/register/freelancer"]'
-            if await page.query_selector(reg_selector):
+            try:
+                await page.wait_for_selector(reg_selector, timeout=5000)
                 logger.info("Register button found -> clicking")
                 await page.eval_on_selector(reg_selector, "el => el.click()")
                 await page.wait_for_url("https://freelancehunt.com/ua/profile/login", timeout=20000)
+            except PlaywrightTimeoutError:
+                logger.info("Register button not found.")
 
             # Login if required
             if "profile/login" in page.url:
@@ -121,7 +123,7 @@ async def process_fh_link(link: str):
 
             # Ensure we are on project page
             if page.url != link:
-                await page.goto(link, wait_until="networkidle", timeout=30000)
+                await page.goto(link, wait_until="networkidle", timeout=45000)
 
             # Detect and solve reCAPTCHA if present
             recaptcha_frame = None
@@ -139,14 +141,18 @@ async def process_fh_link(link: str):
 
             # Click "Сделать ставку"
             add_bid_selector = 'a#add-bid, a.with-tooltip.btn.btn-primary.btn-lg.bottom-margin'
-            add_btn = await page.query_selector(add_bid_selector)
-            if add_btn:
+            try:
+                await page.wait_for_selector(add_bid_selector, timeout=8000)
+                add_btn = await page.query_selector(add_bid_selector)
                 await add_btn.click()
                 await asyncio.sleep(0.7)
+            except PlaywrightTimeoutError:
+                logger.warning("Кнопка 'Сделать ставку' не найдена.")
 
             # Fill bid form
             comment_sel = 'textarea[name="comment"], textarea#comment-0'
-            if await page.query_selector(comment_sel):
+            try:
+                await page.wait_for_selector(comment_sel, timeout=5000)
                 await page.fill(comment_sel, COMMENT_TEMPLATE + "\nСрок выполнения: 1 день")
                 days_sel = 'input[name="days_to_deliver"], input#days_to_deliver-0'
                 if await page.query_selector(days_sel):
@@ -161,7 +167,7 @@ async def process_fh_link(link: str):
                     await send_alert(f"Отклик отправлен на {link}.")
                 else:
                     logger.warning("Не найден submit button.")
-            else:
+            except PlaywrightTimeoutError:
                 logger.warning("Форма комментария не найдена.")
 
             await context.storage_state(path=storage_path)
@@ -185,33 +191,17 @@ async def main():
 
     @client.on(events.NewMessage(incoming=True))
     async def handler(event):
-        # Собираем все ссылки: текст + кнопки
-        links = set()
         text = event.raw_text or ""
         lower = text.lower()
-
         if any(k.lower() in lower for k in KEYWORDS):
-            # Ссылки из текста
-            links.update(FH_LINK_RE.findall(text))
-
-            # Inline кнопки (urls)
-            if event.message.reply_markup:
-                for row in event.message.reply_markup.rows:
-                    for button in row.buttons:
-                        if isinstance(button, KeyboardButtonUrl):
-                            links.update(FH_LINK_RE.findall(button.url))
-
-            # entities urls
-            if event.message.entities:
-                for ent in event.message.entities:
-                    if isinstance(ent, MessageEntityUrl):
-                        url = text[ent.offset:ent.offset+ent.length]
-                        links.update(FH_LINK_RE.findall(url))
-
-            # media webpage (preview link)
-            if isinstance(event.message.media, MessageMediaWebPage):
-                page_url = event.message.media.webpage.url
-                links.update(FH_LINK_RE.findall(page_url))
+            # extract links from text
+            links = FH_LINK_RE.findall(text)
+            # extract links from buttons (inline buttons)
+            if hasattr(event.message, 'buttons') and event.message.buttons:
+                for row in event.message.buttons:
+                    for button in row:
+                        if hasattr(button, 'url') and button.url:
+                            links.append(button.url)
 
             if not links:
                 logger.info("Ключи найдены, но ссылок freelancehunt нет.")
