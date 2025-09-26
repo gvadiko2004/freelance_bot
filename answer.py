@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 # coding: utf-8
 
-import os, time, pickle, random, re, asyncio
+import os, time, random, pickle, asyncio, re
 from pathlib import Path
+from twocaptcha import TwoCaptcha
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
@@ -12,20 +13,17 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
 from webdriver_manager.chrome import ChromeDriverManager
-from twocaptcha import TwoCaptcha
 from telethon import TelegramClient, events
 from telegram import Bot
 
-# ---------------- CONFIG ----------------
-API_ID = int(os.getenv("API_ID", "21882740"))
-API_HASH = os.getenv("API_HASH", "c80a68894509d01a93f5acfeabfdd922")
-ALERT_BOT_TOKEN = os.getenv("ALERT_BOT_TOKEN", "6566504110:AAFK9hA4jxZ0eA7KZGhVvPe8mL2HZj2tQmE")
-ALERT_CHAT_ID = int(os.getenv("ALERT_CHAT_ID", "1168962519"))
-FH_LOGIN = os.getenv("FH_LOGIN", "Vlari")
-FH_PASSWORD = os.getenv("FH_PASSWORD", "Gvadiko_2004")
-CAPTCHA_API_KEY = os.getenv("CAPTCHA_API_KEY", "898059857fb8c709ca5c9613d44ffae4")
+# ------------------- НАСТРОЙКИ -------------------
+API_ID, API_HASH = 21882740, "c80a68894509d01a93f5acfeabfdd922"
+ALERT_BOT_TOKEN, ALERT_CHAT_ID = "6566504110:AAFK9hA4jxZ0eA7KZGhVvPe8mL2HZj2tQmE", 1168962519
+CAPTCHA_API_KEY = "898059857fb8c709ca5c9613d44ffae4"
 HEADLESS = False
+
 LOGIN_URL = "https://freelancehunt.com/ua/profile/login"
+LOGIN_DATA = {"login": "Vlari", "password": "Gvadiko_2004"}
 COOKIES_FILE = "fh_cookies.pkl"
 
 COMMENT_TEXT = ("Доброго дня! Готовий виконати роботу якісно.\n"
@@ -39,16 +37,17 @@ KEYWORDS = [k.lower() for k in [
 
 url_regex = re.compile(r"https?://[^\s\)\]\}]+", re.IGNORECASE)
 
-# ---------------- GLOBALS ----------------
+# ------------------- ГЛОБАЛЫ -------------------
 alert_bot = Bot(token=ALERT_BOT_TOKEN)
 tg_client = TelegramClient("session", API_ID, API_HASH)
 solver = None
 driver = None
 
-# ---------------- HELPERS ----------------
+# ------------------- ЛОГИ -------------------
 def log(msg: str):
     print(f"[ЛОГ] {msg}")
 
+# ------------------- CHROME -------------------
 def make_tmp_profile() -> str:
     tmp = os.path.join("/tmp", f"chrome-temp-{int(time.time())}-{random.randint(0,9999)}")
     Path(tmp).mkdir(parents=True, exist_ok=True)
@@ -89,9 +88,11 @@ def human_scroll_and_move():
         ActionChains(driver).move_by_offset(random.randint(1,50), random.randint(1,50)).perform()
     except: pass
 
+# ------------------- КУКИ -------------------
 def save_cookies():
     try:
-        with open(COOKIES_FILE, "wb") as f: pickle.dump(driver.get_cookies(), f)
+        with open(COOKIES_FILE, "wb") as f:
+            pickle.dump(driver.get_cookies(), f)
         log("Куки сохранены")
     except: pass
 
@@ -104,19 +105,43 @@ def load_cookies():
             log("Куки загружены")
         except: pass
 
+# ------------------- АВТОРИЗАЦИЯ -------------------
 def is_logged_in() -> bool:
     try: driver.find_element(By.CSS_SELECTOR, "a[href='/profile']"); return True
     except: return False
 
+def login_if_needed() -> bool:
+    driver.get(LOGIN_URL)
+    wait_body()
+    load_cookies()
+    if is_logged_in():
+        log("Уже авторизован")
+        return True
+    try:
+        login_field = WebDriverWait(driver, 6).until(EC.presence_of_element_located((By.NAME, "login")))
+        passwd_field = driver.find_element(By.NAME, "password")
+        submit_btn = driver.find_element(By.CSS_SELECTOR, "button[type='submit']")
+        human_type(login_field, LOGIN_DATA["login"])
+        human_type(passwd_field, LOGIN_DATA["password"])
+        try: submit_btn.click()
+        except: driver.execute_script("arguments[0].click();", submit_btn)
+        time.sleep(2); wait_body()
+        if is_logged_in():
+            save_cookies()
+            log("Авторизация успешна")
+            return True
+        log("Авторизация неуспешна, но продолжаем работу")
+        return True
+    except Exception as e:
+        log(f"Ошибка при логине: {e}, продолжаем работу")
+        return True  # игнорируем капчу
+
+# ------------------- АНТИКАПЧА -------------------
 def init_captcha():
     global solver
     if CAPTCHA_API_KEY:
-        try:
-            solver = TwoCaptcha(CAPTCHA_API_KEY)
-            log("Анти-капча инициализирована")
-        except Exception as e:
-            solver = None
-            log(f"Ошибка 2captcha: {e}")
+        try: solver = TwoCaptcha(CAPTCHA_API_KEY); log("Анти-капча инициализирована")
+        except Exception as e: solver = None; log(f"Ошибка 2captcha: {e}")
 
 def try_solve_recaptcha():
     if solver is None: return False
@@ -133,56 +158,20 @@ def try_solve_recaptcha():
                 res = solver.recaptcha(sitekey=sitekey, url=driver.current_url)
                 token = res.get("code") if isinstance(res, dict) else res
                 driver.execute_script("""
-                    (function(token){
-                        var el=document.getElementById('g-recaptcha-response');
-                        if(!el){el=document.createElement('textarea');el.id='g-recaptcha-response';el.style.display='none';document.body.appendChild(el);}
-                        el.innerHTML=token;
-                    })(arguments[0]);
+                (function(token){
+                    var el=document.getElementById('g-recaptcha-response');
+                    if(!el){el=document.createElement('textarea');el.id='g-recaptcha-response';el.style.display='none';document.body.appendChild(el);}
+                    el.innerHTML=token;
+                })(arguments[0]);
                 """, token)
-                try:
-                    btn = driver.find_element(By.CSS_SELECTOR, "form button[type='submit'], form input[type='submit']")
-                    driver.execute_script("arguments[0].click();", btn)
+                try: btn = driver.find_element(By.CSS_SELECTOR, "form button[type='submit'], form input[type='submit']"); driver.execute_script("arguments[0].click();", btn)
                 except: pass
                 log("Капча решена")
                 return True
     except: pass
     return False
 
-# ---------------- LOGIN ----------------
-def login_if_needed():
-    driver.get(LOGIN_URL)
-    wait_body()
-    load_cookies()
-    if is_logged_in():
-        log("Уже авторизован")
-        return True
-
-    try:
-        login_field = WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.NAME, "login")))
-        passwd_field = driver.find_element(By.NAME, "password")
-        submit_btn = driver.find_element(By.CSS_SELECTOR, "button[type='submit']")
-
-        human_type(login_field, FH_LOGIN)
-        human_type(passwd_field, FH_PASSWORD)
-        try_solve_recaptcha()
-        driver.execute_script("arguments[0].click();", submit_btn)
-
-        # Ждём появления профиля до 15 секунд
-        for _ in range(15):
-            time.sleep(1)
-            try_solve_recaptcha()
-            if is_logged_in():
-                save_cookies()
-                log("Авторизация успешна, остаёмся на странице")
-                return True
-
-        log("Авторизация неуспешна, но игнорируем капчу")
-        return True  # Не выходим, просто продолжаем
-    except Exception as e:
-        log(f"Ошибка при логине: {e}, продолжаем работать")
-        return True
-
-# ---------------- TELEGRAM ----------------
+# ------------------- ОБРАБОТКА ССЫЛОК -------------------
 def extract_links(message):
     found = []
     txt = getattr(message, "text", "") or getattr(message, "message", "")
@@ -193,40 +182,58 @@ def extract_links(message):
             for btn in row:
                 url = getattr(btn, "url", None)
                 if url: found.append(url)
-                else: btn_txt = getattr(btn, "text", "") or ""; found += url_regex.findall(btn_txt)
-    uniq = []
-    for u in found:
-        if u not in uniq: uniq.append(u)
-    return uniq
+                else: btn_txt = getattr(btn, "text", "") or ""
+                found += url_regex.findall(btn_txt)
+    return list(dict.fromkeys(found))
 
 async def send_alert(msg: str):
     try: await alert_bot.send_message(chat_id=ALERT_CHAT_ID, text=msg); log(f"TG ALERT: {msg}")
     except: log(f"TG ALERT не отправлено: {msg}")
 
+# ------------------- ПРОВЕРКА СТАВКИ -------------------
+def page_has_already_bid() -> (bool, str):
+    try:
+        el = driver.find_element(By.CSS_SELECTOR, "div.alert.alert-info")
+        return True, el.text.strip()
+    except: return False, ""
+
+# ------------------- СТАВКА -------------------
 async def attempt_bid_on_url(url: str):
     try:
         log(f"Открываю: {url}")
-        driver.get(url)
-        wait_body()
-        try_solve_recaptcha()
+        driver.get(url); wait_body(); try_solve_recaptcha()
+        already, text = page_has_already_bid()
+        if already:
+            log(f"Ставка уже сделана: {text}")
+            await send_alert(f"⚠️ Уже сделано: {url}\n{text}")
+            return False
 
-        # Пример: добавляем комментарий и ставку
-        try:
-            comment_el = driver.find_element(By.ID,"comment-0")
-            human_type(comment_el, COMMENT_TEXT, delay=(0.02,0.07))
+        clicked=False
+        try: btn = WebDriverWait(driver,6).until(EC.element_to_be_clickable((By.ID,"add-bid"))); driver.execute_script("arguments[0].click();", btn); clicked=True
+        except:
+            for c in driver.find_elements(By.CSS_SELECTOR, "a.btn, button.btn"):
+                if "ставк" in (c.text or "").lower() or "сделать" in (c.text or "").lower():
+                    try: driver.execute_script("arguments[0].click();", c); clicked=True; break
+                    except: continue
+        if not clicked:
+            log("Кнопка 'Сделать ставку' не найдена")
+            return False
+
+        human_scroll_and_move()
+        try: comment_el = driver.find_element(By.ID,"comment-0"); human_type(comment_el, COMMENT_TEXT, delay=(0.02,0.07))
+        except: pass
+        try: submit_btn = driver.find_element(By.ID,"btn-submit-0"); driver.execute_script("arguments[0].click();", submit_btn)
         except: pass
 
-        try:
-            submit_btn = driver.find_element(By.ID,"btn-submit-0")
-            driver.execute_script("arguments[0].click();", submit_btn)
-            log(f"Ставка отправлена: {url}")
-            save_cookies()
-            await send_alert(f"✅ Ставка отправлена: {url}")
-        except: log("Не удалось найти кнопку 'Добавить'"); pass
+        save_cookies()
+        await send_alert(f"✅ Ставка отправлена: {url}")
+        return True
     except Exception as e:
         log(f"Ошибка attempt_bid_on_url: {e}")
         await send_alert(f"❌ Ошибка ставки: {e}\n{url}")
+        return False
 
+# ------------------- TELEGRAM -------------------
 @tg_client.on(events.NewMessage)
 async def handler_newmsg(event):
     try:
@@ -236,22 +243,17 @@ async def handler_newmsg(event):
             links = extract_links(event.message)
             for u in links:
                 await attempt_bid_on_url(u)
-    except Exception as e:
-        log(f"handler_newmsg: ошибка: {e}")
+    except Exception as e: log(f"handler_newmsg: ошибка: {e}")
 
-# ---------------- MAIN ----------------
+# ------------------- MAIN -------------------
 async def main():
     global driver
     driver = create_driver()
     init_captcha()
     login_if_needed()
-    await tg_client.start()
-    log("Telegram клиент запущен, ожидаю сообщений...")
+    await tg_client.start(); log("Telegram клиент запущен, ожидаю сообщений...")
     await tg_client.run_until_disconnected()
 
 if __name__=="__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        log("Завершение работы")
-        if driver: driver.quit()
+    try: asyncio.run(main())
+    except KeyboardInterrupt: log("Завершение работы"); driver.quit()
