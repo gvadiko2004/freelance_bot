@@ -207,12 +207,23 @@ async def make_bid(url):
 def extract_links(msg):
     text = msg.message if hasattr(msg,"message") else str(msg)
     links = re.findall(r"https?://[^\s)]+", text)
-    return list(set(links))
+
+    # Добавляем ссылки из inline-кнопок Telegram
+    try:
+        for row in getattr(msg,"buttons",[]) or []:
+            for btn in row:
+                url = getattr(btn,"url",None)
+                if url and "freelancehunt.com" in url:
+                    links.append(url)
+    except: pass
+
+    return list(set(links))  # убираем дубликаты
 
 @tg_client.on(events.NewMessage)
 async def on_msg(event):
     txt = (event.message.text or "").lower()
     links = extract_links(event.message)
+    # Если в тексте есть ключевые слова и ссылки на проекты
     if links and any(k in txt for k in KEYWORDS):
         for link in links:
             asyncio.create_task(make_bid(link))
