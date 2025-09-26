@@ -26,9 +26,11 @@ LOGIN_URL = "https://freelancehunt.com/ua/profile/login"
 LOGIN_DATA = {"login": "Vlari", "password": "Gvadiko_2004"}
 COOKIES_FILE = "fh_cookies.pkl"
 
-COMMENT_TEXT = ("Доброго дня! Готовий виконати роботу якісно.\n"
-                "Портфоліо робіт у моєму профілі.\n"
-                "Заздалегідь дякую!")
+COMMENT_TEXT = (
+    "Доброго дня! Готовий виконати роботу якісно.\n"
+    "Портфоліо робіт у моєму профілі.\n"
+    "Заздалегідь дякую!"
+)
 
 KEYWORDS = [k.lower() for k in [
     "#html_и_css_верстка","#веб_программирование","#cms",
@@ -130,7 +132,7 @@ def login_if_needed() -> bool:
             save_cookies()
             log("Авторизация успешна")
             return True
-        log("Авторизация неуспешна, но продолжаем работу")
+        log("Авторизация неуспешна, продолжаем работу")
         return True
     except Exception as e:
         log(f"Ошибка при логине: {e}, продолжаем работу")
@@ -160,7 +162,8 @@ def try_solve_recaptcha():
                 driver.execute_script("""
                 (function(token){
                     var el=document.getElementById('g-recaptcha-response');
-                    if(!el){el=document.createElement('textarea');el.id='g-recaptcha-response';el.style.display='none';document.body.appendChild(el);}
+                    if(!el){el=document.createElement('textarea');el.id='g-recaptcha-response';
+                    el.style.display='none';document.body.appendChild(el);}
                     el.innerHTML=token;
                 })(arguments[0]);
                 """, token)
@@ -208,8 +211,12 @@ async def attempt_bid_on_url(url: str):
             await send_alert(f"⚠️ Уже сделано: {url}\n{text}")
             return False
 
+        # Пытаемся нажать кнопку "Добавить ставку"
         clicked=False
-        try: btn = WebDriverWait(driver,6).until(EC.element_to_be_clickable((By.ID,"add-bid"))); driver.execute_script("arguments[0].click();", btn); clicked=True
+        try: 
+            btn = WebDriverWait(driver,6).until(EC.element_to_be_clickable((By.ID,"add-bid")))
+            driver.execute_script("arguments[0].click();", btn)
+            clicked=True
         except:
             for c in driver.find_elements(By.CSS_SELECTOR, "a.btn, button.btn"):
                 if "ставк" in (c.text or "").lower() or "сделать" in (c.text or "").lower():
@@ -220,8 +227,10 @@ async def attempt_bid_on_url(url: str):
             return False
 
         human_scroll_and_move()
+
         try: comment_el = driver.find_element(By.ID,"comment-0"); human_type(comment_el, COMMENT_TEXT, delay=(0.02,0.07))
         except: pass
+
         try: submit_btn = driver.find_element(By.ID,"btn-submit-0"); driver.execute_script("arguments[0].click();", submit_btn)
         except: pass
 
@@ -256,4 +265,6 @@ async def main():
 
 if __name__=="__main__":
     try: asyncio.run(main())
-    except KeyboardInterrupt: log("Завершение работы"); driver.quit()
+    except KeyboardInterrupt: 
+        log("Завершение работы")
+        driver.quit()
