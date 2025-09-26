@@ -1,13 +1,14 @@
-# answer.py
+# answer_playwright.py
 import asyncio
 import re
 import json
 import logging
+import random
+import time
 from pathlib import Path
 import os
 from dotenv import load_dotenv
 import aiohttp
-
 from telethon import TelegramClient, events
 from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
 
@@ -38,24 +39,24 @@ BROWSER_STATE_DIR.mkdir(exist_ok=True)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("freelance_bot")
 
+FH_LINK_RE = re.compile(r"https://freelancehunt\.com[^\s)]+", re.IGNORECASE)
+
+COMMENT_TEXT = (
+    "Доброго дня! Готовий виконати роботу якісно.\n"
+    "Портфоліо робіт у моєму профілі.\n"
+    "Заздалегідь дякую!"
+)
+
 # Load processed links
 if PROCESSED_FILE.exists():
     processed = set(json.loads(PROCESSED_FILE.read_text()))
 else:
     processed = set()
 
-FH_LINK_RE = re.compile(r"https://freelancehunt\.com[^\s)]+", re.IGNORECASE)
-
-COMMENT_TEMPLATE = (
-    "Доброго дня! Готовий виконати роботу якісно.\n"
-    "Портфоліо робіт у моєму профілі.\n"
-    "Заздалегідь дякую!"
-)
-
 # ---------------- Utilities ----------------
-async def send_alert(text: str):
+async def send_alert(msg: str):
     url = f"https://api.telegram.org/bot{ALERT_BOT_TOKEN}/sendMessage"
-    payload = {"chat_id": ALERT_CHAT_ID, "text": text}
+    payload = {"chat_id": ALERT_CHAT_ID, "text": msg}
     async with aiohttp.ClientSession() as sess:
         try:
             async with sess.post(url, json=payload, timeout=10) as r:
@@ -69,10 +70,9 @@ def save_processed():
 
 async def solve_captcha_2captcha(session: aiohttp.ClientSession, site_key: str, page_url: str) -> str:
     logger.info("Инициализация reCAPTCHA...")
-    api_key = CAPTCHA_API_KEY
     create_url = "http://2captcha.com/in.php"
     get_url = "http://2captcha.com/res.php"
-    params = {"key": api_key, "method": "userrecaptcha", "googlekey": site_key, "pageurl": page_url, "json": 1}
+    params = {"key": CAPTCHA_API_KEY, "method": "userrecaptcha", "googlekey": site_key, "pageurl": page_url, "json": 1}
     async with session.post(create_url, data=params) as resp:
         j = await resp.json()
     if j.get("status") != 1:
@@ -81,7 +81,7 @@ async def solve_captcha_2captcha(session: aiohttp.ClientSession, site_key: str, 
     logger.info("reCAPTCHA отправлена на решение, ожидаем результат...")
     for _ in range(30):
         await asyncio.sleep(5)
-        async with session.get(get_url, params={"key": api_key, "action":"get", "id":request_id, "json":1}) as r:
+        async with session.get(get_url, params={"key": CAPTCHA_API_KEY, "action":"get", "id":request_id, "json":1}) as r:
             res = await r.json()
         if res.get("status") == 1:
             logger.info("reCAPTCHA решена!")
@@ -89,139 +89,125 @@ async def solve_captcha_2captcha(session: aiohttp.ClientSession, site_key: str, 
     raise RuntimeError("Captcha solve timeout")
 
 # ---------------- Core ----------------
-async def process_fh_link(link: str):
-    logger.info("Processing link: %s", link)
-    await send_alert(f"Начинаю обработку ссылки: {link}")
-    storage_path = str(BROWSER_STATE_DIR / "playwright_storage.json")
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=False)
-        context = await browser.new_context(storage_state=storage_path if Path(storage_path).exists() else None)
-        page = await context.new_page()
+async def human_scroll_and_move(page):
+    await page.evaluate("window.scrollTo(0, document.body.scrollHeight*0.3);")
+    await asyncio.sleep(random.uniform(0.15,0.4))
+    await page.evaluate("window.scrollTo(0, document.body.scrollHeight*0.6);")
+    await page.mouse.move(random.randint(1,50), random.randint(1,50))
 
-        try:
-            # Navigate to project page and wait until fully loaded
-            await page.goto(link, wait_until="networkidle", timeout=45000)
-            logger.info("Страница полностью загружена.")
+async def attempt_bid_on_url(page, url: str):
+    logger.info(f"Открываю: {url}")
+    await page.goto(url, wait_until="networkidle")
+    await asyncio.sleep(1)
+    
+    # reCAPTCHA
+    frames = page.frames
+    for f in frames:
+        if "https://www.google.com/recaptcha/api2/anchor" in f.url:
+            site_key = await f.get_attribute("#recaptcha-anchor", "data-sitekey")
+            async with aiohttp.ClientSession() as session:
+                token = await solve_captcha_2captcha(session, site_key, page.url)
+            await page.evaluate(f'document.getElementById("g-recaptcha-response").innerHTML="{token}";')
+            logger.info("reCAPTCHA токен введен")
 
-            # Check for register/login page
-            reg_selector = 'a.with-tooltip.btn.btn-primary.btn-md.bottom-margin[href^="https://freelancehunt.com/ua/register/freelancer"]'
-            try:
-                await page.wait_for_selector(reg_selector, timeout=5000)
-                logger.info("Register button found -> clicking")
-                await page.eval_on_selector(reg_selector, "el => el.click()")
-                await page.wait_for_url("https://freelancehunt.com/ua/profile/login", timeout=20000)
-            except PlaywrightTimeoutError:
-                logger.info("Register button not found.")
+    # Click "Сделать ставку"
+    clicked=False
+    try:
+        btn = await page.wait_for_selector("#add-bid, a.btn-primary", timeout=5000)
+        await btn.click()
+        clicked=True
+    except:
+        for c in await page.query_selector_all("a.btn, button.btn"):
+            txt = (await c.inner_text()).lower()
+            if "ставк" in txt or "сделать" in txt:
+                await c.click()
+                clicked=True
+                break
+    if not clicked:
+        logger.warning("Кнопка 'Сделать ставку' не найдена")
+        return False
 
-            # Login if required
-            if "profile/login" in page.url:
-                logger.info("На странице логина, выполняю вход")
-                await page.fill('input[name="login"]', FH_LOGIN)
-                await page.fill('input[name="password"]', FH_PASSWORD)
-                await page.click('button[type="submit"]')
-                await page.wait_for_load_state('networkidle', timeout=15000)
+    await human_scroll_and_move(page)
 
-            # Ensure we are on project page
-            if page.url != link:
-                await page.goto(link, wait_until="networkidle", timeout=45000)
+    try:
+        await page.fill("#amount-0, input[name='amount']", "1111")
+    except: pass
+    try:
+        await page.fill("#days_to_deliver-0, input[name='days_to_deliver']", "3")
+    except: pass
+    try:
+        await page.fill("#comment-0, textarea[name='comment']", COMMENT_TEXT)
+    except: pass
 
-            # Detect and solve reCAPTCHA if present
-            recaptcha_frame = None
-            for f in page.frames:
-                if "https://www.google.com/recaptcha/api2/anchor" in f.url:
-                    recaptcha_frame = f
-                    break
-            if recaptcha_frame:
-                logger.info("reCAPTCHA инициализирована, решаем...")
-                site_key = await recaptcha_frame.get_attribute('#recaptcha-anchor', 'data-sitekey')
-                async with aiohttp.ClientSession() as session:
-                    token = await solve_captcha_2captcha(session, site_key, page.url)
-                await page.evaluate(f'document.getElementById("g-recaptcha-response").innerHTML="{token}";')
-                logger.info("reCAPTCHA токен введен.")
+    submitted=False
+    try:
+        submit_btn = await page.query_selector("#btn-submit-0, button.btn-primary")
+        await submit_btn.click()
+        submitted=True
+    except:
+        pass
 
-            # Click "Сделать ставку"
-            add_bid_selector = 'a#add-bid, a.with-tooltip.btn.btn-primary.btn-lg.bottom-margin'
-            try:
-                await page.wait_for_selector(add_bid_selector, timeout=8000)
-                add_btn = await page.query_selector(add_bid_selector)
-                await add_btn.click()
-                await asyncio.sleep(0.7)
-            except PlaywrightTimeoutError:
-                logger.warning("Кнопка 'Сделать ставку' не найдена.")
+    if submitted:
+        logger.info(f"Ставка отправлена: {url}")
+        await send_alert(f"✅ Ставка отправлена: {url}")
+        return True
+    else:
+        logger.warning("Не удалось нажать кнопку 'Добавить'")
+        return False
 
-            # Fill bid form
-            comment_sel = 'textarea[name="comment"], textarea#comment-0'
-            try:
-                await page.wait_for_selector(comment_sel, timeout=5000)
-                await page.fill(comment_sel, COMMENT_TEMPLATE + "\nСрок выполнения: 1 день")
-                days_sel = 'input[name="days_to_deliver"], input#days_to_deliver-0'
-                if await page.query_selector(days_sel):
-                    await page.fill(days_sel, "1")
-                amount_sel = 'input[name="amount"], input#amount-0'
-                if await page.query_selector(amount_sel):
-                    await page.fill(amount_sel, "1111")
-                submit_sel = 'button#add-0, button[name="add"], button[type="submit"].ladda-button'
-                if await page.query_selector(submit_sel):
-                    await page.click(submit_sel)
-                    logger.info("Ставка отправлена!")
-                    await send_alert(f"Отклик отправлен на {link}.")
-                else:
-                    logger.warning("Не найден submit button.")
-            except PlaywrightTimeoutError:
-                logger.warning("Форма комментария не найдена.")
-
-            await context.storage_state(path=storage_path)
-            logger.info("Состояние браузера сохранено.")
-
-        except PlaywrightTimeoutError:
-            logger.error("Таймаут при загрузке страницы или ожидании элемента.")
-        except Exception as e:
-            logger.exception("Ошибка при обработке ссылки: %s", e)
-            await send_alert(f"Ошибка при обработке {link}: {e}")
-        finally:
-            await context.close()
-            await browser.close()
+def extract_links(message):
+    found=[]
+    txt = getattr(message, "text", "") or getattr(message, "message", "")
+    if txt: found+=FH_LINK_RE.findall(txt)
+    buttons = getattr(message, "buttons", None)
+    if buttons:
+        for row in buttons:
+            for btn in row:
+                url=getattr(btn,"url",None)
+                if url: found.append(url)
+                else: btn_txt = getattr(btn,"text","") or ""; found+=FH_LINK_RE.findall(btn_txt)
+    uniq=[]
+    for u in found:
+        if u not in uniq: uniq.append(u)
+    return uniq
 
 # ---------------- Telegram monitoring ----------------
 async def main():
     global processed
-    client = TelegramClient("freelance_telethon_session", API_ID, API_HASH)
-    await client.start()
-    logger.info("Telegram client started.")
+    tg_client = TelegramClient("freelance_telethon_session", API_ID, API_HASH)
+    await tg_client.start()
+    logger.info("Telegram client started")
 
-    @client.on(events.NewMessage(incoming=True))
-    async def handler(event):
-        text = event.raw_text or ""
-        lower = text.lower()
-        if any(k.lower() in lower for k in KEYWORDS):
-            # extract links from text
-            links = FH_LINK_RE.findall(text)
-            # extract links from buttons (inline buttons)
-            if hasattr(event.message, 'buttons') and event.message.buttons:
-                for row in event.message.buttons:
-                    for button in row:
-                        if hasattr(button, 'url') and button.url:
-                            links.append(button.url)
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=False)
+        context = await browser.new_context()
+        page = await context.new_page()
 
-            if not links:
-                logger.info("Ключи найдены, но ссылок freelancehunt нет.")
-                return
+        @tg_client.on(events.NewMessage(incoming=True))
+        async def handler(event):
+            try:
+                text = (event.message.text or "").lower()
+                if any(k in text for k in KEYWORDS):
+                    links = extract_links(event.message)
+                    if not links:
+                        logger.info("Ключевое слово найдено, но ссылки не обнаружены.")
+                        await send_alert("⚠️ Ключевое слово найдено, но ссылки не обнаружены.")
+                        return
+                    for url in links:
+                        if url in processed: continue
+                        processed.add(url)
+                        save_processed()
+                        await attempt_bid_on_url(page, url)
+            except Exception as e:
+                logger.exception(f"handler_newmsg error: {e}")
 
-            for link in links:
-                link = link.rstrip('.,)')
-                if link in processed:
-                    logger.info("Ссылка уже обработана: %s", link)
-                    continue
-                processed.add(link)
-                save_processed()
-                asyncio.create_task(process_fh_link(link))
-                await send_alert(f"Найдена ссылка с ключевыми словами: {link}")
+        logger.info("Запуск мониторинга сообщений...")
+        await tg_client.run_until_disconnected()
+        await context.close()
+        await browser.close()
 
-    logger.info("Запуск мониторинга входящих сообщений...")
-    await client.run_until_disconnected()
-
-if __name__ == "__main__":
+if __name__=="__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        logger.info("Остановлено пользователем.")
+        logger.info("Завершение работы")
