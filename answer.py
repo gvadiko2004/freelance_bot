@@ -16,32 +16,34 @@ from webdriver_manager.chrome import ChromeDriverManager
 from telethon import TelegramClient, events
 from telegram import Bot
 
-# ---------- CONFIG ----------
+# ---------------- CONFIG ----------------
 API_ID, API_HASH = 21882740, "c80a68894509d01a93f5acfeabfdd922"
 ALERT_BOT_TOKEN, ALERT_CHAT_ID = "6566504110:AAFK9hA4jxZ0eA7KZGhVvPe8mL2HZj2tQmE", 1168962519
 CAPTCHA_API_KEY = "898059857fb8c709ca5c9613d44ffae4"
+
 HEADLESS = False
 LOGIN_URL = "https://freelancehunt.com/ua/profile/login"
 LOGIN_DATA = {"login": "Vlari", "password": "Gvadiko_2004"}
 COOKIES_FILE = "fh_cookies.pkl"
-COMMENT_TEXT = (
-    "Доброго дня! Готовий виконати роботу якісно.\n"
-    "Портфоліо робіт у моєму профілі.\n"
-    "Заздалегідь дякую!"
-)
+
+COMMENT_TEXT = ("Доброго дня! Готовий виконати роботу якісно.\n"
+                "Портфоліо робіт у моєму профілі.\n"
+                "Заздалегідь дякую!")
+
 KEYWORDS = [k.lower() for k in [
     "#html_и_css_верстка","#веб_программирование","#cms",
     "#интернет_магазины_и_электронная_коммерция","#создание_сайта_под_ключ","#дизайн_сайтов"
 ]]
+
 url_regex = re.compile(r"https?://[^\s\)\]\}]+", re.IGNORECASE)
 
-# ---------- GLOBALS ----------
+# ---------------- GLOBALS ----------------
 alert_bot = Bot(token=ALERT_BOT_TOKEN)
 tg_client = TelegramClient("session", API_ID, API_HASH)
 solver = None
 driver = None
 
-# ---------- UTILITIES ----------
+# ---------------- UTILS ----------------
 def log(msg: str):
     print(f"[ЛОГ] {msg}")
 
@@ -78,32 +80,42 @@ def human_type(el, text, delay=(0.04,0.12)):
         time.sleep(random.uniform(*delay))
 
 def human_scroll_and_move():
-    driver.execute_script("window.scrollTo(0, document.body.scrollHeight*0.3);")
-    time.sleep(random.uniform(0.15,0.4))
-    driver.execute_script("window.scrollTo(0, document.body.scrollHeight*0.6);")
-    ActionChains(driver).move_by_offset(random.randint(1,50), random.randint(1,50)).perform()
+    try:
+        driver.execute_script("window.scrollTo(0, document.body.scrollHeight*0.3);")
+        time.sleep(random.uniform(0.15,0.4))
+        driver.execute_script("window.scrollTo(0, document.body.scrollHeight*0.6);")
+        ActionChains(driver).move_by_offset(random.randint(1,50), random.randint(1,50)).perform()
+    except: pass
 
 def save_cookies():
-    with open(COOKIES_FILE, "wb") as f:
-        pickle.dump(driver.get_cookies(), f)
-    log("Куки сохранены")
+    try:
+        with open(COOKIES_FILE, "wb") as f: pickle.dump(driver.get_cookies(), f)
+        log("Куки сохранены")
+    except: pass
 
 def load_cookies():
     if os.path.exists(COOKIES_FILE):
-        for c in pickle.load(open(COOKIES_FILE,"rb")):
-            try: driver.add_cookie(c)
-            except: pass
-        log("Куки загружены")
+        try:
+            for c in pickle.load(open(COOKIES_FILE,"rb")):
+                try: driver.add_cookie(c)
+                except: pass
+            log("Куки загружены")
+        except: pass
 
 def is_logged_in() -> bool:
-    try: driver.find_element(By.CSS_SELECTOR, "a[href='/profile']"); return True
-    except: return False
+    try:
+        driver.find_element(By.CSS_SELECTOR, "a[href^='/profile']")
+        return True
+    except:
+        return False
 
 def login_if_needed() -> bool:
     driver.get(LOGIN_URL)
     wait_body()
     load_cookies()
-    if is_logged_in(): log("Уже авторизован"); return True
+    if is_logged_in():
+        log("Уже авторизован")
+        return True
     try:
         login_field = WebDriverWait(driver, 6).until(EC.presence_of_element_located((By.NAME, "login")))
         passwd_field = driver.find_element(By.NAME, "password")
@@ -112,10 +124,15 @@ def login_if_needed() -> bool:
         human_type(passwd_field, LOGIN_DATA["password"])
         try: submit_btn.click()
         except: driver.execute_script("arguments[0].click();", submit_btn)
-        time.sleep(2); wait_body()
-        if is_logged_in(): save_cookies(); log("Авторизация успешна"); return True
-        log("Авторизация неуспешна"); return False
-    except Exception as e: log(f"Ошибка при логине: {e}"); return False
+
+        # Даем время странице прогрузиться и проверяем логин
+        WebDriverWait(driver, 10).until(lambda d: is_logged_in())
+        save_cookies()
+        log("Авторизация успешна")
+        return True
+    except Exception as e:
+        log(f"Ошибка при логине: {e}")
+        return False
 
 def init_captcha():
     global solver
@@ -146,7 +163,8 @@ def try_solve_recaptcha():
                 """, token)
                 try: btn = driver.find_element(By.CSS_SELECTOR, "form button[type='submit'], form input[type='submit']"); driver.execute_script("arguments[0].click();", btn)
                 except: pass
-                log("Капча решена"); return True
+                log("Капча решена")
+                return True
     except: pass
     return False
 
@@ -191,7 +209,6 @@ async def attempt_bid_on_url(url: str):
         if not clicked: log("Кнопка 'Сделать ставку' не найдена"); return False
 
         human_scroll_and_move()
-
         try: amt_el = driver.find_element(By.ID, "amount-0"); amt_el.clear(); human_type(amt_el,"1111")
         except: pass
         try: days_el = driver.find_element(By.ID,"days_to_deliver-0"); days_el.clear(); human_type(days_el,"3")
@@ -213,7 +230,7 @@ async def attempt_bid_on_url(url: str):
     except Exception as e:
         log(f"Ошибка attempt_bid_on_url: {e}"); await send_alert(f"❌ Ошибка ставки: {e}\n{url}"); return False
 
-# ---------- TELEGRAM HANDLER ----------
+# ---------------- TELEGRAM HANDLER ----------------
 @tg_client.on(events.NewMessage)
 async def handler_newmsg(event):
     try:
@@ -228,7 +245,7 @@ async def handler_newmsg(event):
                 if ok: log(f"Ставка успешно отправлена по ссылке: {u}"); break
     except Exception as e: log(f"handler_newmsg: ошибка: {e}")
 
-# ---------- MAIN ----------
+# ---------------- MAIN ----------------
 async def main():
     global driver
     driver = create_driver()
