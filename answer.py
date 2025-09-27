@@ -1,257 +1,155 @@
-#!/usr/bin/env python3
-# coding: utf-8
-
-import os, time, random, pickle, asyncio, re
-from pathlib import Path
+import os
+import pickle
+import re
+import threading
+import time
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
-from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException
+from selenium.common.exceptions import TimeoutException, NoSuchElementException
+from selenium.webdriver.chrome.options import Options
 from webdriver_manager.chrome import ChromeDriverManager
 from telethon import TelegramClient, events
-from telegram import Bot
-import tempfile
-from twocaptcha import TwoCaptcha
 
-# ---------------- CONFIG ----------------
-API_ID, API_HASH = 21882740, "c80a68894509d01a93f5acfeabfdd922"
-ALERT_BOT_TOKEN, ALERT_CHAT_ID = "6566504110:AAFK9hA4jxZ0eA7KZGhVvPe8mL2HZj2tQmE", 1168962519
-HEADLESS = True  # Для VPS
-CAPTCHA_API_KEY = "898059857fb8c709ca5c9613d44ffae4"
+# ===== Настройки Telegram =====
+api_id = 21882740
+api_hash = "c80a68894509d01a93f5acfeabfdd922"
 
-LOGIN_URL = "https://freelancehunt.com/ua/profile/login"
-LOGIN_DATA = {"login": "Vlari", "password": "Gvadiko_2004"}
+KEYWORDS = [
+    "#html_и_css_верстка",
+    "#веб_программирование",
+    "#cms",
+    "#интернет_магазины_и_электронная_коммерция",
+    "#создание_сайта_под_ключ",
+    "#дизайн_сайтов"
+]
+KEYWORDS = [kw.lower() for kw in KEYWORDS]
+
+COMMENT_TEXT = """Доброго дня! Готовий виконати роботу якісно.
+Портфоліо робіт у моєму профілі.
+Заздалегідь дякую!
+"""
+
+PROFILE_PATH = "/root/chrome_profile"  # папка профиля на VPS
 COOKIES_FILE = "fh_cookies.pkl"
 
-COMMENT_TEXT = "Доброго дня! Готовий виконати роботу якісно.\nПортфоліо робіт у моєму профілі.\nЗаздалегідь дякую!"
-DEFAULT_DAYS = "3"
-DEFAULT_AMOUNT = "1111"
+# ---------------- Функции ----------------
+def extract_links(text):
+    return re.findall(r"https?://[^\s]+", text)
 
-KEYWORDS = [k.lower() for k in [
-    "#html_и_css_верстка","#веб_программирование","#cms",
-    "#интернет_магазины_и_электронная_коммерция","#создание_сайта_под_ключ","#дизайн_сайтов"
-]]
+def save_cookies(driver):
+    with open(COOKIES_FILE, "wb") as f:
+        pickle.dump(driver.get_cookies(), f)
 
-# ---------------- INIT ----------------
-alert_bot = Bot(token=ALERT_BOT_TOKEN)
-tg_client = TelegramClient("session", API_ID, API_HASH)
-driver = None
-solver = TwoCaptcha(CAPTCHA_API_KEY)
-
-# ---------------- UTILS ----------------
-def log(msg):
-    print(f"[ЛОГ] {msg}")
-
-def tmp_profile():
-    tmp = tempfile.mkdtemp(prefix="chrome-")
-    return tmp
-
-def create_driver():
-    opts = Options()
-    opts.add_argument("--no-sandbox")
-    opts.add_argument("--disable-dev-shm-usage")
-    opts.add_argument("--window-size=1366,900")
-    opts.add_argument("--disable-blink-features=AutomationControlled")
-    if HEADLESS:
-        opts.add_argument("--headless=new")
-    opts.add_argument(f"--user-data-dir={tmp_profile()}")
-    opts.add_experimental_option("excludeSwitches", ["enable-automation"])
-    opts.add_experimental_option("useAutomationExtension", False)
-    
-    drv = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=opts)
-    drv.set_page_load_timeout(60)
-    log(f"Chrome готов, HEADLESS={HEADLESS}")
-    return drv
-
-def human_type(el, text, delay=(0.03,0.08)):
-    for ch in text:
-        el.send_keys(ch)
-        time.sleep(random.uniform(*delay))
-
-def human_scroll():
-    try:
-        driver.execute_script("window.scrollTo(0, document.body.scrollHeight*0.3);")
-        time.sleep(random.uniform(0.2,0.4))
-        driver.execute_script("window.scrollTo(0, document.body.scrollHeight*0.6);")
-        ActionChains(driver).move_by_offset(random.randint(1,50), random.randint(1,50)).perform()
-    except: pass
-
-def save_cookies():
-    try:
-        with open(COOKIES_FILE,"wb") as f:
-            pickle.dump(driver.get_cookies(),f)
-        log("Куки сохранены")
-    except: pass
-
-def load_cookies():
-    if not os.path.exists(COOKIES_FILE): return False
-    try:
-        with open(COOKIES_FILE,"rb") as f:
-            for c in pickle.load(f):
-                try: driver.add_cookie(c)
-                except: pass
-        log("Куки загружены")
-        return True
-    except: return False
-
-def logged_in():
-    try:
-        driver.find_element(By.CSS_SELECTOR,"a[href='/profile']")
-        return True
-    except: return False
-
-# ---------------- CAPTCHA ----------------
-def solve_recaptcha():
-    """Используем 2Captcha для решения reCAPTCHA v2"""
-    try:
-        site_key = driver.find_element(By.CLASS_NAME, "g-recaptcha").get_attribute("data-sitekey")
-        url = driver.current_url
-        result = solver.recaptcha(sitekey=site_key, url=url)
-        token = result.get("code")
-        driver.execute_script(f'document.getElementById("g-recaptcha-response").innerHTML="{token}";')
-        log("CAPTCHA решена")
-        return True
-    except Exception as e:
-        log(f"Ошибка решения CAPTCHA: {e}")
-        return False
-
-# ---------------- LOGIN ----------------
-def login():
-    driver.get(LOGIN_URL)
-    try:
-        WebDriverWait(driver, 15).until(
-            EC.presence_of_element_located((By.ID, "login-0"))
-        )
-    except TimeoutException:
-        log("Страница логина не загрузилась")
-        return False
-
-    load_cookies()
-    if logged_in():
-        log("Уже авторизован")
-        return True
-
-    try:
-        login_input = driver.find_element(By.ID, "login-0")
-        password_input = driver.find_element(By.ID, "password-0")
-        submit_btn = driver.find_element(By.ID, "save-0")
-
-        login_input.clear()
-        login_input.send_keys(LOGIN_DATA["login"])
-        password_input.clear()
-        password_input.send_keys(LOGIN_DATA["password"])
-
-        # Решаем reCAPTCHA, если есть
-        try:
-            if driver.find_elements(By.CLASS_NAME, "g-recaptcha"):
-                solve_recaptcha()
-        except: pass
-
-        submit_btn.click()
-
-        WebDriverWait(driver, 15).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR,"a[href='/profile']"))
-        )
-        log("Авторизация успешна")
-        save_cookies()
-        return True
-
-    except Exception as e:
-        log(f"Ошибка авторизации: {e}")
-        return False
-
-# ---------------- ALERT ----------------
-async def send_alert(msg):
-    try:
-        await alert_bot.send_message(chat_id=ALERT_CHAT_ID,text=msg)
-        log(f"TG ALERT: {msg}")
-    except: pass
-
-# ---------------- BID ----------------
-async def make_bid(url):
-    try:
-        log(f"Открываю: {url}")
+def load_cookies(driver, url):
+    if os.path.exists(COOKIES_FILE):
+        with open(COOKIES_FILE, "rb") as f:
+            cookies = pickle.load(f)
         driver.get(url)
+        for cookie in cookies:
+            try:
+                driver.add_cookie(cookie)
+            except:
+                pass
+        driver.refresh()
+        return True
+    return False
 
+def authorize_manual(driver, wait):
+    print("[INFO] Если требуется авторизация, войдите вручную в браузере.")
+    for _ in range(60):
         try:
-            WebDriverWait(driver, 20).until(
-                EC.presence_of_element_located((By.ID, "add-bid"))
-            )
-        except TimeoutException:
-            log("Кнопка 'Сделать ставку' не найдена после ожидания")
-            await send_alert(f"⚠️ Кнопка 'Сделать ставку' не найдена: {url}")
-            return
+            if driver.find_element(By.ID, "add-bid").is_displayed():
+                print("[INFO] Авторизация завершена")
+                save_cookies(driver)
+                return True
+        except:
+            time.sleep(1)
+    print("[WARN] Авторизация не выполнена, продолжаем")
+    return False
 
-        load_cookies()
-        if not logged_in():
-            login()
-            driver.get(url)
-            WebDriverWait(driver, 15).until(
-                EC.presence_of_element_located((By.ID, "add-bid"))
-            )
+def make_bid(url):
+    chrome_options = Options()
+    chrome_options.headless = False  # Открываем визуально
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    chrome_options.add_argument(f"--user-data-dir={PROFILE_PATH}")
+    chrome_options.add_argument("--start-maximized")
+    chrome_options.add_argument("--window-size=1366,768")
+    chrome_options.add_argument("--remote-debugging-port=9222")
 
-        add_bid_btn = driver.find_element(By.ID, "add-bid")
-        driver.execute_script("arguments[0].click();", add_bid_btn)
-        log("Кликнули 'Сделать ставку'")
-        human_scroll()
+    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
+    wait = WebDriverWait(driver, 30)
 
-        amount_input = WebDriverWait(driver,5).until(EC.presence_of_element_located((By.ID,"amount-0")))
-        days_input = driver.find_element(By.ID,"days_to_deliver-0")
-        comment_input = driver.find_element(By.ID,"comment-0")
-
-        human_type(amount_input, DEFAULT_AMOUNT)
-        human_type(days_input, DEFAULT_DAYS)
-        human_type(comment_input, COMMENT_TEXT)
-
-        add_btn = driver.find_element(By.ID,"add-0")
-        driver.execute_script("arguments[0].click();", add_btn)
-        log("Ставка отправлена!")
-        await send_alert(f"✅ Ставка отправлена: {url}")
-        save_cookies()
-
-    except Exception as e:
-        log(f"Ошибка make_bid: {e}")
-        await send_alert(f"❌ Ошибка ставки: {e}\n{url}")
-
-# ---------------- TELEGRAM ----------------
-def extract_links_from_telegram(msg):
-    links = []
-    text = getattr(msg, "message", "") or ""
-    links += re.findall(r"https?://[^\s)]+", text)
     try:
-        buttons = getattr(msg, "buttons", [])
-        for row in buttons:
-            for btn in row:
-                url = getattr(btn, "url", None)
-                if url and "freelancehunt.com" in url:
-                    links.append(url)
-    except: pass
-    return list(set(links))
+        driver.get(url)
+        wait.until(lambda d: d.execute_script("return document.readyState") == "complete")
+        print(f"[INFO] Страница проекта загружена: {url}")
 
-@tg_client.on(events.NewMessage)
-async def on_msg(event):
-    txt = (event.message.text or "").lower()
-    if any(k in txt for k in KEYWORDS):
-        links = extract_links_from_telegram(event.message)
-        for link in links:
-            asyncio.create_task(make_bid(link))
+        load_cookies(driver, url)
+        authorize_manual(driver, wait)
 
-# ---------------- MAIN ----------------
-async def main():
-    global driver
-    driver = create_driver()
-    await tg_client.start()
-    log("Telegram клиент запущен")
-    await tg_client.run_until_disconnected()
+        bid_btn = wait.until(EC.element_to_be_clickable((By.ID, "add-bid")))
+        driver.execute_script("arguments[0].click();", bid_btn)
+        print("[INFO] Первый клик 'Сделать ставку' выполнен")
 
-if __name__=="__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        log("Завершение работы")
-        if driver:
-            driver.quit()
+        # Ввод суммы
+        try:
+            price_span = wait.until(EC.presence_of_element_located((
+                By.CSS_SELECTOR, "span.text-green.bold.pull-right.price.with-tooltip.hidden-xs"
+            )))
+            price = re.sub(r"[^\d]", "", price_span.text) or "1111"
+        except:
+            price = "1111"
+
+        amount_input = wait.until(EC.element_to_be_clickable((By.ID, "amount-0")))
+        amount_input.clear()
+        amount_input.send_keys(price)
+
+        # Ввод дней
+        days_input = wait.until(EC.element_to_be_clickable((By.ID, "days_to_deliver-0")))
+        days_input.clear()
+        days_input.send_keys("3")
+
+        # Вставка комментария через JS
+        comment_area = wait.until(EC.presence_of_element_located((By.ID, "comment-0")))
+        driver.execute_script("arguments[0].value = arguments[1];", comment_area, COMMENT_TEXT)
+        print("[INFO] Комментарий вставлен")
+
+        # Второй клик — подтверждаем ставку
+        driver.execute_script("arguments[0].click();", bid_btn)
+        print("[SUCCESS] Ставка отправлена!")
+
+        # Оставляем браузер открытым для просмотра в VNC
+        print("[INFO] Браузер остаётся открытым. Закройте вручную, когда нужно.")
+        while True:
+            time.sleep(10)
+
+    except (TimeoutException, NoSuchElementException) as e:
+        print(f"[ERROR] Не удалось сделать ставку: {e}")
+        print("[INFO] Браузер остаётся открытым для отладки.")
+        while True:
+            time.sleep(10)
+
+def process_project(url):
+    threading.Thread(target=make_bid, args=(url,), daemon=True).start()
+
+# ---------------- Телеграм ----------------
+client = TelegramClient("session", api_id, api_hash)
+
+@client.on(events.NewMessage)
+async def handler(event):
+    text = (event.message.text or "").lower()
+    if any(k in text for k in KEYWORDS):
+        print(f"[INFO] Новый проект: {text[:100]}")
+        links = extract_links(text)
+        if links:
+            process_project(links[0])
+
+# ---------------- Запуск ----------------
+if __name__ == "__main__":
+    print("[INFO] Бот запущен. Ожидаем новые проекты...")
+    client.start()
+    client.run_until_disconnected()
