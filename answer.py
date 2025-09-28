@@ -1,23 +1,21 @@
 #!/usr/bin/env python3
 # coding: utf-8
 """
-Телеграм-бот, который отслеживает новые сообщения в Telegram, ищет ключевые слова
-и пересылает полный диалог на ваш бот (через Bot API).
+Телеграм-бот на Telethon: ищет ключевые слова в новых сообщениях и пересылает полный диалог.
+После запуска отправляет тестовое сообщение о готовности.
 """
 
 import re
 import time
 from telethon import TelegramClient, events
-from telegram import Bot
 
 # ---------------- CONFIG ----------------
 API_ID = 21882740
 API_HASH = "c80a68894509d01a93f5acfeabfdd922"
 
-ALERT_BOT_TOKEN = "6566504110:AAFK9hA4jxZ0eA7KZGhVvPe8mL2HZj2tQmE"  # твой бот
-ALERT_CHAT_ID   = 123456789  # <-- сюда вставь свой chat_id, куда бот отправляет
+ALERT_CHAT_ID = 123456789  # <-- сюда вставь свой chat_id, куда бот отправляет
 
-# ключевые слова для поиска
+# Ключевые слова
 KEYWORDS = [k.lower() for k in [
     "#html_и_css_верстка",
     "#веб_программирование",
@@ -28,17 +26,16 @@ KEYWORDS = [k.lower() for k in [
 ]]
 
 # ---------------- INIT ----------------
-alert_bot = Bot(token=ALERT_BOT_TOKEN)
 tg_client = TelegramClient("session", API_ID, API_HASH)
 
 # ---------------- HELPERS ----------------
 def log(msg):
     print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {msg}", flush=True)
 
-def send_alert_text(text):
+async def send_alert_text(text):
     try:
-        alert_bot.send_message(chat_id=ALERT_CHAT_ID, text=text)
-        log("Отправлено сообщение через бота")
+        await tg_client.send_message(ALERT_CHAT_ID, text)
+        log("Сообщение отправлено")
     except Exception as e:
         log(f"Ошибка при отправке сообщения: {e}")
 
@@ -49,29 +46,35 @@ async def on_new_message(event):
     sender = await event.get_sender()
     sender_name = getattr(sender, 'username', None) or getattr(sender, 'first_name', 'Unknown')
 
-    # Проверяем ключевые слова
+    # Проверка ключевых слов
     if any(k in text for k in KEYWORDS):
         log(f"Найдено ключевое слово в сообщении от {sender_name}")
 
-        # Получаем полный диалог (последние 50 сообщений)
+        # Получаем последние 50 сообщений в диалоге
         try:
             dialog_messages = []
             async for msg in tg_client.iter_messages(event.chat_id, limit=50):
                 sender_msg = getattr(msg.sender, 'username', None) or getattr(msg.sender, 'first_name', 'Unknown')
                 dialog_messages.append(f"{sender_msg}: {msg.text or ''}")
-            full_dialog = "\n".join(reversed(dialog_messages))  # от старых к новым
+            full_dialog = "\n".join(reversed(dialog_messages))
         except Exception as e:
             full_dialog = f"Не удалось получить полный диалог: {e}"
 
-        # Отправляем полный диалог через бота
-        send_alert_text(f"⚡ Найден проект по ключевому слову в чате '{sender_name}':\n\n{full_dialog}")
+        # Отправляем полный диалог себе
+        await send_alert_text(f"⚡ Найден проект по ключевому слову в чате '{sender_name}':\n\n{full_dialog}")
 
 # ---------------- START ----------------
-def main():
+async def main():
     log("Запуск Telegram клиента...")
-    tg_client.start()
+    await tg_client.start()
     log("Клиент запущен, ожидаем новые сообщения...")
-    tg_client.run_until_disconnected()
+
+    # Отправляем тестовое сообщение о готовности
+    await send_alert_text("✅ Бот успешно запущен и готов к работе!")
+
+    # Ожидание новых сообщений
+    await tg_client.run_until_disconnected()
 
 if __name__ == "__main__":
-    main()
+    import asyncio
+    asyncio.run(main())
