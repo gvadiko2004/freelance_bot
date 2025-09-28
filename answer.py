@@ -36,15 +36,25 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             print(f"[ERROR] Не удалось переслать сообщение: {e}")
 
-async def start_bot():
+async def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle_message))
-    print("✅ Бот запущен. Ожидание сообщений...")
-    await app.run_polling()
 
-# Если цикл уже запущен, используем create_task
-try:
-    asyncio.get_running_loop()
-    asyncio.create_task(start_bot())
-except RuntimeError:
-    asyncio.run(start_bot())
+    print("✅ Бот запущен. Ожидание сообщений...")
+
+    # В этом режиме run_polling не закрывает loop, просто запускаем polling
+    await app.initialize()
+    await app.start()
+    await app.updater.start_polling()
+    await app.updater.idle()  # чтобы бот работал постоянно
+
+if __name__ == "__main__":
+    # Запускаем в существующем loop, если он есть
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(main())
+        print("🔹 Запуск через существующий цикл событий")
+        loop.run_forever()
+    except RuntimeError:
+        # Если loop нет, создаём новый
+        asyncio.run(main())
