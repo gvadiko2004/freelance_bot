@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 # coding: utf-8
 """
-Телеграм-бот на Telethon: ищет ключевые слова в новых сообщениях и пересылает полный диалог.
-Разбивает длинные сообщения на части ≤ 4000 символов.
-После запуска отправляет тестовое сообщение о готовности.
+Телеграм-бот: ищет ключевые слова в новых сообщениях и пересылает полный диалог на ваш бот.
 """
 
 import time
@@ -13,11 +11,10 @@ from telethon import TelegramClient, events
 API_ID = 21882740
 API_HASH = "c80a68894509d01a93f5acfeabfdd922"
 
-# Можно использовать username или числовой ID
-ALERT_USER = "achie_81"  # username
-# ALERT_USER = 1168962519  # либо ID
+# Твой бот или username, куда пересылаем сообщения
+ALERT_USER = "iliarchie_bot"  # username бота
 
-# Ключевые слова для поиска
+# Ключевые слова
 KEYWORDS = [k.lower() for k in [
     "#html_и_css_верстка",
     "#веб_программирование",
@@ -35,12 +32,10 @@ def log(msg):
     print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {msg}", flush=True)
 
 async def send_alert_text(text):
-    """
-    Отправка текста на ALERT_USER, разбивая длинные сообщения на куски ≤ 4000 символов
-    """
+    """Отправка текста на ALERT_USER, разбивая на куски ≤ 4000 символов"""
     try:
         entity = await tg_client.get_input_entity(ALERT_USER)
-        max_len = 4000  # Telegram ограничение
+        max_len = 4000
         for i in range(0, len(text), max_len):
             await tg_client.send_message(entity, text[i:i+max_len])
         log("Сообщение отправлено")
@@ -68,7 +63,7 @@ async def on_new_message(event):
         except Exception as e:
             full_dialog = f"Не удалось получить полный диалог: {e}"
 
-        # Отправляем полный диалог себе
+        # Отправляем полный диалог на твой бот
         await send_alert_text(f"⚡ Найден проект по ключевому слову в чате '{sender_name}':\n\n{full_dialog}")
 
 # ---------------- START ----------------
@@ -77,7 +72,7 @@ async def main():
     await tg_client.start()
     log("Клиент запущен, ожидаем новые сообщения...")
 
-    # Отправляем тестовое сообщение о готовности
+    # Тестовое сообщение о готовности
     await send_alert_text("✅ Бот успешно запущен и готов к работе!")
 
     # Ожидание новых сообщений
