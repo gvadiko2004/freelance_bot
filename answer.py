@@ -11,7 +11,7 @@ API_ID = 21882740
 API_HASH = "c80a68894509d01a93f5acfeabfdd922"
 
 BOT_TOKEN = "6566504110:AAFK9hA4jxZ0eA7KZGhVvPe8mL2HZj2tQmE"
-ALERT_USER_ID = 1168962519  # Куда слать уведомления
+ALERT_USER_ID = 1168962519  # Кому бот будет отправлять уведомления
 
 KEYWORDS = [k.lower() for k in [
     "html", "верстка", "сайт", "wordpress", "лендинг",
@@ -55,7 +55,7 @@ async def handler(event):
         chat_name = getattr(chat, 'title', 'Личный чат')
         sender_name = getattr(sender, 'username', None) or getattr(sender, 'first_name', 'Unknown')
 
-        alert_text = f"⚡ Новое сообщение с ключевым словом:\nЧат: {chat_name}\nОт: {sender_name}\n\nСообщение:\n{text}"
+        alert_text = f"⚡ Найден диалог с ключевым словом:\nЧат: {chat_name}\nОт: {sender_name}\n\nСообщение:\n{text}"
 
         log(f"⚡ Найдено ключевое слово в '{chat_name}' от {sender_name}")
         send_bot_alert(alert_text)
