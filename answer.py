@@ -17,6 +17,8 @@ KEYWORDS = [k.lower() for k in [
     "магазин", "веб", "cms", "дизайн", "разработка"
 ]]
 
+CONTEXT_MESSAGES = 2  # Количество предыдущих сообщений для контекста
+
 # ---------------- INIT ----------------
 client = TelegramClient("session", API_ID, API_HASH)
 processed_messages = set()  # Чтобы не слать дубликаты
@@ -34,15 +36,25 @@ def send_bot_alert(text):
     except Exception as e:
         log(f"Ошибка отправки через бота: {e}")
 
+async def get_context(event, limit=CONTEXT_MESSAGES):
+    """Возвращает последние N сообщений перед текущим для контекста"""
+    msgs = []
+    try:
+        async for msg in client.iter_messages(event.chat_id, limit=limit, reverse=True):
+            sender_name = getattr(msg.sender, 'username', None) or getattr(msg.sender, 'first_name', 'Unknown')
+            msgs.append(f"{sender_name}: {msg.text or ''}")
+    except Exception as e:
+        msgs.append(f"[Не удалось получить контекст: {e}]")
+    return "\n".join(msgs)
+
 # ---------------- MAIN HANDLER ----------------
 @client.on(events.NewMessage)
 async def handler(event):
-    # Игнорируем свои сообщения
     sender = await event.get_sender()
+    # Игнорируем свои сообщения
     if sender.is_self:
         return
 
-    # Проверяем, чтобы уведомление отправлялось один раз
     if event.id in processed_messages:
         return
     processed_messages.add(event.id)
@@ -55,19 +67,30 @@ async def handler(event):
         sender_name = getattr(sender, 'username', None) or getattr(sender, 'first_name', 'Unknown')
         chat_name = getattr(chat, 'title', 'Личный чат')
 
-        log(f"⚡ Найдено ключевое слово в '{chat_name}' от {sender_name}")
+        context_text = await get_context(event, CONTEXT_MESSAGES)
+        alert_text = f"⚡ Найдено сообщение:\nЧат: {chat_name}\nОт: {sender_name}\n\nКонтекст:\n{context_text}\n\nСообщение:\n{text}"
 
-        alert_text = f"⚡ Найдено сообщение:\nЧат: {chat_name}\nОт: {sender_name}\n\n{text}"
+        log(f"⚡ Найдено ключевое слово в '{chat_name}' от {sender_name}")
         send_bot_alert(alert_text)
+
+# ---------------- HEARTBEAT ----------------
+import asyncio
+async def heartbeat():
+    while True:
+        log("Бот жив и работает...")
+        await asyncio.sleep(10)
 
 # ---------------- START ----------------
 async def main():
     log("Запуск Telegram клиента...")
     await client.start()
     send_bot_alert("✅ Бот успешно запущен и мониторит чаты!")
+
+    # Запускаем heartbeat параллельно
+    asyncio.create_task(heartbeat())
+
     log("Бот запущен, ждёт события...")
     await client.run_until_disconnected()
 
 if __name__ == "__main__":
-    import asyncio
     asyncio.run(main())
