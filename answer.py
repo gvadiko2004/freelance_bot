@@ -23,6 +23,7 @@ CONTEXT_MESSAGES = 2  # Количество предыдущих сообщен
 client = TelegramClient("session", API_ID, API_HASH)
 processed_messages = set()  # Чтобы не слать дубликаты
 
+# ---------------- HELPERS ----------------
 def log(msg):
     print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {msg}", flush=True)
 
@@ -55,15 +56,16 @@ async def handler(event):
     if sender.is_self:
         return
 
-    if event.id in processed_messages:
+    # Уникальный идентификатор: chat_id + message_id
+    message_key = (event.chat_id, event.id)
+    if message_key in processed_messages:
         return
-    processed_messages.add(event.id)
+    processed_messages.add(message_key)
 
     text = (event.message.text or "").lower()
 
     if any(k in text for k in KEYWORDS):
         chat = await event.get_chat()
-
         sender_name = getattr(sender, 'username', None) or getattr(sender, 'first_name', 'Unknown')
         chat_name = getattr(chat, 'title', 'Личный чат')
 
