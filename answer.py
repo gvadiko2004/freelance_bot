@@ -4,6 +4,7 @@
 import asyncio
 from telethon import TelegramClient, events
 from telegram import Bot
+import re
 
 # -------- CONFIG --------
 API_ID = 21882740
@@ -17,14 +18,15 @@ KEYWORDS = [
     "#создание_сайта_под_ключ", "#дизайн_сайтов"
 ]
 
-ALLOWED_CHATS = []  # Пустой = любые чаты
+MIN_TEXT_LENGTH = 10  # Минимальная длина текста для пересылки
+IGNORE_LINKS = True   # Игнорировать сообщения со ссылками
 
 # -------- INIT --------
 tg_client = TelegramClient("session", API_ID, API_HASH)
 alert_bot = Bot(token=BOT_TOKEN)
 
-# Для отслеживания уже обработанных сообщений
-processed_messages = set()
+# Для отслеживания уже пересланных сообщений
+processed_texts = set()
 
 # -------- HELPERS --------
 async def send_alert(msg):
@@ -38,34 +40,37 @@ def contains_keywords(text):
     text_lower = text.lower()
     return any(k.lower() in text_lower for k in KEYWORDS)
 
-def is_valid_message(event):
-    if not event.message.message:
+def is_valid_message(text):
+    text = text.strip()
+    if len(text) < MIN_TEXT_LENGTH:
         return False
-    if ALLOWED_CHATS and event.chat_id not in ALLOWED_CHATS:
-        return False
-    if len(event.message.message) < 5:
+    if IGNORE_LINKS and re.search(r"https?://", text):
         return False
     return True
 
 # -------- EVENTS --------
 @tg_client.on(events.NewMessage)
 async def handler(event):
-    msg_id = event.message.id
-    if msg_id in processed_messages:
-        return  # Уже обработано
-    processed_messages.add(msg_id)
-
-    if not is_valid_message(event):
+    if not hasattr(event.message, "message") or not event.message.message:
         return
 
-    text = event.message.message
+    text = event.message.message.strip()
+
+    # Игнорировать уже пересланные тексты
+    if text in processed_texts:
+        return
+
+    if not is_valid_message(text):
+        return
+
     if contains_keywords(text):
+        processed_texts.add(text)
         await send_alert(f"Найдено сообщение с ключевым словом:\n{text}")
 
 # -------- MAIN --------
 async def main():
     await tg_client.start()
-    await send_alert("Бот успешно запущен! Теперь отслеживаем новые сообщения...")
+    await send_alert("✅ Бот успешно запущен! Теперь отслеживаем новые сообщения...")
     print("Telegram клиент запущен. Ожидание сообщений...")
     await tg_client.run_until_disconnected()
 
