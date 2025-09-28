@@ -5,7 +5,6 @@
 После запуска отправляет тестовое сообщение о готовности.
 """
 
-import re
 import time
 from telethon import TelegramClient, events
 
@@ -13,9 +12,11 @@ from telethon import TelegramClient, events
 API_ID = 21882740
 API_HASH = "c80a68894509d01a93f5acfeabfdd922"
 
-ALERT_CHAT_ID = 123456789  # <-- сюда вставь свой chat_id, куда бот отправляет
+# Можно использовать username или числовой ID
+ALERT_USER = "achie_81"  # username
+# ALERT_USER = 1168962519  # либо ID
 
-# Ключевые слова
+# Ключевые слова для поиска
 KEYWORDS = [k.lower() for k in [
     "#html_и_css_верстка",
     "#веб_программирование",
@@ -34,7 +35,8 @@ def log(msg):
 
 async def send_alert_text(text):
     try:
-        await tg_client.send_message(ALERT_CHAT_ID, text)
+        entity = await tg_client.get_input_entity(ALERT_USER)
+        await tg_client.send_message(entity, text)
         log("Сообщение отправлено")
     except Exception as e:
         log(f"Ошибка при отправке сообщения: {e}")
