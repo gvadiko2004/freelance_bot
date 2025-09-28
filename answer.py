@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
 # coding: utf-8
-"""
-Телеграм-бот: ищет ключевые слова в новых сообщениях и пересылает полный диалог на ваш бот.
-"""
 
 import time
 from telethon import TelegramClient, events
@@ -11,10 +8,8 @@ from telethon import TelegramClient, events
 API_ID = 21882740
 API_HASH = "c80a68894509d01a93f5acfeabfdd922"
 
-# Твой бот или username, куда пересылаем сообщения
-ALERT_USER = "iliarchie_bot"  # username бота
-
-# Ключевые слова
+YOUR_USERNAME = "iliarchie_bot"  # Кому бот будет отправлять уведомления
+CONTEXT_MESSAGES = 3              # Количество сообщений для контекста
 KEYWORDS = [k.lower() for k in [
     "#html_и_css_верстка",
     "#веб_программирование",
@@ -25,58 +20,61 @@ KEYWORDS = [k.lower() for k in [
 ]]
 
 # ---------------- INIT ----------------
-tg_client = TelegramClient("session", API_ID, API_HASH)
+client = TelegramClient("session", API_ID, API_HASH)
+processed_messages = set()  # чтобы не дублировать уведомления
 
 # ---------------- HELPERS ----------------
 def log(msg):
     print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {msg}", flush=True)
 
-async def send_alert_text(text):
-    """Отправка текста на ALERT_USER, разбивая на куски ≤ 4000 символов"""
+async def send_alert(text):
     try:
-        entity = await tg_client.get_input_entity(ALERT_USER)
-        max_len = 4000
-        for i in range(0, len(text), max_len):
-            await tg_client.send_message(entity, text[i:i+max_len])
-        log("Сообщение отправлено")
+        entity = await client.get_input_entity(YOUR_USERNAME)
+        # Разбиваем длинные сообщения на куски ≤ 4000 символов
+        for i in range(0, len(text), 4000):
+            await client.send_message(entity, text[i:i+4000])
+        log("Уведомление отправлено")
     except Exception as e:
-        log(f"Ошибка при отправке сообщения: {e}")
+        log(f"Ошибка отправки уведомления: {e}")
 
-# ---------------- TELEGRAM ----------------
-@tg_client.on(events.NewMessage)
-async def on_new_message(event):
+async def get_context(event, limit=CONTEXT_MESSAGES):
+    """Возвращает последние N сообщений перед текущим для контекста"""
+    msgs = []
+    try:
+        async for msg in client.iter_messages(event.chat_id, limit=limit, reverse=True):
+            sender_name = getattr(msg.sender, 'username', None) or getattr(msg.sender, 'first_name', 'Unknown')
+            msgs.append(f"{sender_name}: {msg.text or ''}")
+    except Exception as e:
+        msgs.append(f"[Не удалось получить контекст: {e}]")
+    return "\n".join(msgs)
+
+# ---------------- EVENTS ----------------
+@client.on(events.NewMessage)
+async def handle_new_message(event):
+    if event.id in processed_messages:
+        return
+    processed_messages.add(event.id)
+
     text = (event.message.text or "").lower()
-    sender = await event.get_sender()
-    sender_name = getattr(sender, 'username', None) or getattr(sender, 'first_name', 'Unknown')
-
-    # Проверка ключевых слов
     if any(k in text for k in KEYWORDS):
+        sender = await event.get_sender()
+        sender_name = getattr(sender, 'username', None) or getattr(sender, 'first_name', 'Unknown')
         log(f"Найдено ключевое слово в сообщении от {sender_name}")
 
-        # Получаем последние 50 сообщений в диалоге
-        try:
-            dialog_messages = []
-            async for msg in tg_client.iter_messages(event.chat_id, limit=50):
-                sender_msg = getattr(msg.sender, 'username', None) or getattr(msg.sender, 'first_name', 'Unknown')
-                dialog_messages.append(f"{sender_msg}: {msg.text or ''}")
-            full_dialog = "\n".join(reversed(dialog_messages))
-        except Exception as e:
-            full_dialog = f"Не удалось получить полный диалог: {e}"
-
-        # Отправляем полный диалог на твой бот
-        await send_alert_text(f"⚡ Найден проект по ключевому слову в чате '{sender_name}':\n\n{full_dialog}")
+        context = await get_context(event, CONTEXT_MESSAGES)
+        full_text = f"⚡ Найден проект по ключевому слову в чате '{sender_name}':\n\n{context}"
+        await send_alert(full_text)
 
 # ---------------- START ----------------
 async def main():
     log("Запуск Telegram клиента...")
-    await tg_client.start()
+    await client.start()
     log("Клиент запущен, ожидаем новые сообщения...")
 
-    # Тестовое сообщение о готовности
-    await send_alert_text("✅ Бот успешно запущен и готов к работе!")
+    # Отправляем тестовое уведомление
+    await send_alert("✅ Бот успешно запущен и готов к работе!")
 
-    # Ожидание новых сообщений
-    await tg_client.run_until_disconnected()
+    await client.run_until_disconnected()
 
 if __name__ == "__main__":
     import asyncio
