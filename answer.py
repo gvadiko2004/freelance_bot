@@ -11,7 +11,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException, NoSuchElementException
+from selenium.common.exceptions import TimeoutException
 from webdriver_manager.chrome import ChromeDriverManager
 from telethon import TelegramClient, events
 from telegram import Bot
@@ -20,7 +20,7 @@ from telegram import Bot
 API_ID, API_HASH = 21882740, "c80a68894509d01a93f5acfeabfdd922"
 ALERT_BOT_TOKEN, ALERT_CHAT_ID = "6566504110:AAFK9hA4jxZ0eA7KZGhVvPe8mL2HZj2tQmE", 1168962519
 CAPTCHA_API_KEY = "898059857fb8c709ca5c9613d44ffae4"
-HEADLESS = False
+HEADLESS = True
 LOGIN_URL = "https://freelancehunt.com/ua/profile/login"
 LOGIN_DATA = {"login": "Vlari", "password": "Gvadiko_2004"}
 COOKIES_FILE = "fh_cookies.pkl"
@@ -47,20 +47,16 @@ def ensure_dns(host="freelancehunt.com"):
         log(f"DNS НЕУДАЛОСЬ: {host}")
         return False
 
-def tmp_profile():
-    tmp = f"/tmp/chrome-{int(time.time())}-{random.randint(0,9999)}"
-    Path(tmp).mkdir(parents=True, exist_ok=True)
-    return tmp
-
 def driver_create():
     opts = Options()
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-dev-shm-usage")
     opts.add_argument("--window-size=1280,900")
-    if HEADLESS: opts.add_argument("--headless=new")
-    opts.add_argument(f"--user-data-dir={tmp_profile()}")
+    if HEADLESS:
+        opts.add_argument("--headless=new")
     opts.add_experimental_option("excludeSwitches", ["enable-automation"])
     opts.add_experimental_option("useAutomationExtension", False)
+    
     drv = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=opts)
     drv.set_page_load_timeout(60)
     log(f"Chrome готов, HEADLESS={HEADLESS}")
@@ -239,11 +235,6 @@ def extract_links(msg):
 
 @tg_client.on(events.NewMessage)
 async def on_msg(event):
-    # --- Игнорируем свои собственные сообщения ---
-    me = await tg_client.get_me()
-    if event.sender_id == me.id:
-        return
-
     txt = (event.message.text or "").lower()
     links = extract_links(event.message)
     if links and any(k in txt for k in KEYWORDS):
