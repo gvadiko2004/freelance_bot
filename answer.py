@@ -1,10 +1,11 @@
 import asyncio
 from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filters
-import time
 
+# Ваш токен бота
 BOT_TOKEN = "6566504110:AAFK9hA4jxZ0eA7KZGhVvPe8mL2HZj2tQmE"
 
+# Список ключевых слов
 KEYWORDS = [
     "#html_и_css_верстка",
     "#веб_программирование",
@@ -15,48 +16,40 @@ KEYWORDS = [
     "Создание сайта на Wordpress"
 ]
 
-sent_alerts = set()
-FLOOD_INTERVAL = 2
-last_sent_time = 0
+# Ваш chat_id, куда бот будет пересылать найденные сообщения
+TARGET_CHAT_ID = 1168962519  # замените на свой ID
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global last_sent_time
     msg = update.message
     if not msg:
         return
 
-    # Берём текст сообщения или подпись медиа
+    # Получаем текст или подпись медиа
     text = msg.text or msg.caption
     if not text:
         return
 
-    chat_id = msg.chat_id
-    message_id = msg.message_id
-
-    if any(keyword in text for keyword in KEYWORDS):
-        if message_id in sent_alerts:
-            return
-
-        now = time.time()
-        if now - last_sent_time < FLOOD_INTERVAL:
-            return
-
+    # Проверяем ключевые слова
+    if any(keyword.lower() in text.lower() for keyword in KEYWORDS):
         try:
-            await context.bot.send_message(
-                chat_id=chat_id,
-                text=f"✅ Найдено сообщение с ключевым словом:\n{text}"
+            # Пересылаем сообщение целиком
+            await context.bot.forward_message(
+                chat_id=TARGET_CHAT_ID,
+                from_chat_id=msg.chat_id,
+                message_id=msg.message_id
             )
-            sent_alerts.add(message_id)
-            last_sent_time = now
+            print(f"✅ Переслано сообщение: {text[:50]}...")  # для логов
         except Exception as e:
-            print(f"[ERROR] Не удалось отправить сообщение: {e}")
+            print(f"[ERROR] Не удалось переслать сообщение: {e}")
 
-def main():
+async def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
+
+    # Ловим любые сообщения кроме команд
     app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle_message))
 
     print("✅ Бот запущен. Ожидание сообщений...")
-    app.run_polling()
+    await app.run_polling()
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
