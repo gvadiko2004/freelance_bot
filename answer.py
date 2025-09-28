@@ -18,8 +18,6 @@ KEYWORDS = [k.lower() for k in [
     "магазин", "веб", "cms", "дизайн", "разработка"
 ]]
 
-CONTEXT_LIMIT = 5  # Количество последних сообщений для пересылки диалога
-
 # ---------------- INIT ----------------
 client = TelegramClient("session", API_ID, API_HASH)
 processed_messages = set()  # Чтобы не слать дубликаты
@@ -38,22 +36,10 @@ def send_bot_alert(text):
     except Exception as e:
         log(f"Ошибка отправки через бота: {e}")
 
-async def get_full_dialog(event, limit=CONTEXT_LIMIT):
-    """Возвращает последние N сообщений для контекста/диалога"""
-    messages = []
-    try:
-        async for msg in client.iter_messages(event.chat_id, limit=limit, reverse=True):
-            sender_name = getattr(msg.sender, 'username', None) or getattr(msg.sender, 'first_name', 'Unknown')
-            messages.append(f"{sender_name}: {msg.text or ''}")
-    except Exception as e:
-        messages.append(f"[Ошибка получения диалога: {e}]")
-    return "\n".join(messages)
-
 # ---------------- MAIN HANDLER ----------------
 @client.on(events.NewMessage)
 async def handler(event):
     sender = await event.get_sender()
-    # Игнорируем свои сообщения
     if sender.is_self:
         return
 
@@ -69,9 +55,7 @@ async def handler(event):
         chat_name = getattr(chat, 'title', 'Личный чат')
         sender_name = getattr(sender, 'username', None) or getattr(sender, 'first_name', 'Unknown')
 
-        # Получаем весь диалог (последние CONTEXT_LIMIT сообщений)
-        dialog = await get_full_dialog(event, CONTEXT_LIMIT)
-        alert_text = f"⚡ Найден диалог с ключевым словом:\nЧат: {chat_name}\nОт: {sender_name}\n\n{dialog}"
+        alert_text = f"⚡ Новое сообщение с ключевым словом:\nЧат: {chat_name}\nОт: {sender_name}\n\nСообщение:\n{text}"
 
         log(f"⚡ Найдено ключевое слово в '{chat_name}' от {sender_name}")
         send_bot_alert(alert_text)
@@ -88,7 +72,6 @@ async def main():
     await client.start()
     send_bot_alert("✅ Бот успешно запущен и мониторит чаты!")
 
-    # Запускаем heartbeat
     asyncio.create_task(heartbeat())
 
     log("Бот запущен, ждёт новых сообщений...")
