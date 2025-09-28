@@ -1,81 +1,92 @@
 #!/usr/bin/env python3
 # coding: utf-8
 
-import time
-import requests
-import asyncio
+import asyncio, re
 from telethon import TelegramClient, events
+from telegram import Bot
 
-# ---------------- CONFIG ----------------
+# --- CONFIG ---
 API_ID = 21882740
 API_HASH = "c80a68894509d01a93f5acfeabfdd922"
-
 BOT_TOKEN = "6566504110:AAFK9hA4jxZ0eA7KZGhVvPe8mL2HZj2tQmE"
-ALERT_USER_ID = 1168962519  # Кому бот будет отправлять уведомления
+OWNER_ID = 1168962519  # твой Telegram ID
 
+# ключевые слова (поиск ведется без регистра)
 KEYWORDS = [k.lower() for k in [
-    "html", "верстка", "сайт", "wordpress", "лендинг",
-    "магазин", "веб", "cms", "дизайн", "разработка"
+    "#html_и_css_верстка",
+    "#веб_программирование",
+    "#cms",
+    "#интернет_магазины_и_электронная_коммерция",
+    "#создание_сайта_под_ключ",
+    "#дизайн_сайтов"
 ]]
 
-# ---------------- INIT ----------------
-client = TelegramClient("session", API_ID, API_HASH)
-processed_messages = set()  # Чтобы не слать дубликаты
+# --- INIT ---
+tg_client = TelegramClient("session", API_ID, API_HASH)
+alert_bot = Bot(token=BOT_TOKEN)
 
-# ---------------- HELPERS ----------------
-def log(msg):
-    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {msg}", flush=True)
+# --- HELPERS ---
+def extract_links(msg):
+    """Ищет ссылки в тексте и в кнопках"""
+    text = msg.message or ""
+    links = []
 
-def send_bot_alert(text):
-    """Отправка уведомления через Telegram Bot API"""
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    data = {"chat_id": ALERT_USER_ID, "text": text}
+    # ссылки из текста
+    urls = re.findall(r"https?://[^\s)]+", text)
+    links.extend(urls)
+
+    # ссылки из inline кнопок
     try:
-        requests.post(url, data=data)
-        log("Уведомление отправлено ботом")
-    except Exception as e:
-        log(f"Ошибка отправки через бота: {e}")
+        for row in getattr(msg, "buttons", []) or []:
+            for btn in row:
+                url = getattr(btn, "url", None)
+                if url:
+                    links.append(url)
+    except:
+        pass
 
-# ---------------- MAIN HANDLER ----------------
-@client.on(events.NewMessage)
-async def handler(event):
-    sender = await event.get_sender()
-    if sender.is_self:
-        return
+    # убираем дубликаты и **звёздочки**
+    clean = []
+    for link in links:
+        link = link.replace("*", "").strip()
+        if link not in clean:
+            clean.append(link)
 
-    # Уникальный ключ для предотвращения дубликатов
-    message_key = (event.chat_id, event.id)
-    if message_key in processed_messages:
-        return
-    processed_messages.add(message_key)
+    return clean
 
+# --- MAIN HANDLER ---
+@tg_client.on(events.NewMessage)
+async def handle_message(event):
     text = (event.message.text or "").lower()
-    if any(k in text for k in KEYWORDS):
-        chat = await event.get_chat()
-        chat_name = getattr(chat, 'title', 'Личный чат')
-        sender_name = getattr(sender, 'username', None) or getattr(sender, 'first_name', 'Unknown')
+    if not any(k in text for k in KEYWORDS):
+        return  # если нет ключевых слов — выходим
 
-        alert_text = f"⚡ Найден диалог с ключевым словом:\nЧат: {chat_name}\nОт: {sender_name}\n\nСообщение:\n{text}"
+    links = extract_links(event.message)
+    msg_text = event.message.text or ""
 
-        log(f"⚡ Найдено ключевое слово в '{chat_name}' от {sender_name}")
-        send_bot_alert(alert_text)
+    report = f"🔍 Найдено сообщение по ключевому слову!\n\n"
+    report += f"👤 От: {event.chat.title if event.chat else 'личка'}\n\n"
+    report += f"📄 Текст:\n{msg_text}\n\n"
 
-# ---------------- HEARTBEAT ----------------
-async def heartbeat():
-    while True:
-        log("Бот жив и работает...")
-        await asyncio.sleep(10)
+    if links:
+        report += "🔗 Ссылки:\n" + "\n".join(links)
+    else:
+        report += "❌ Ссылок не найдено"
 
-# ---------------- START ----------------
+    try:
+        await alert_bot.send_message(chat_id=OWNER_ID, text=report)
+        print(f"[INFO] Переслано сообщение: {event.id}")
+    except Exception as e:
+        print(f"[ERROR] Не удалось отправить сообщение: {e}")
+
+# --- MAIN LOOP ---
 async def main():
-    log("Запуск Telegram клиента...")
-    await client.start()
-    send_bot_alert("✅ Бот успешно запущен и мониторит чаты!")
-
-    asyncio.create_task(heartbeat())
-
-    log("Бот запущен, ждёт новых сообщений...")
-    await client.run_until_disconnected()
+    await tg_client.start()
+    print("✅ Мониторинг Telegram запущен...")
+    await tg_client.run_until_disconnected()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("🛑 Остановка бота")
