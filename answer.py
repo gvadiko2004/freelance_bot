@@ -10,7 +10,7 @@ API_ID = 21882740
 API_HASH = "c80a68894509d01a93f5acfeabfdd922"
 
 BOT_TOKEN = "6566504110:AAFK9hA4jxZ0eA7KZGhVvPe8mL2HZj2tQmE"
-ALERT_USER_ID = 1168962519  # <- Куда отправлять уведомления
+ALERT_USER_ID = 1168962519  # Куда слать уведомления
 
 KEYWORDS = [k.lower() for k in [
     "html", "верстка", "сайт", "wordpress", "лендинг",
@@ -19,6 +19,7 @@ KEYWORDS = [k.lower() for k in [
 
 # ---------------- INIT ----------------
 client = TelegramClient("session", API_ID, API_HASH)
+processed_messages = set()  # Чтобы не слать дубликаты
 
 def log(msg):
     print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {msg}", flush=True)
@@ -36,10 +37,19 @@ def send_bot_alert(text):
 # ---------------- MAIN HANDLER ----------------
 @client.on(events.NewMessage)
 async def handler(event):
+    # Игнорируем свои сообщения
+    sender = await event.get_sender()
+    if sender.is_self:
+        return
+
+    # Проверяем, чтобы уведомление отправлялось один раз
+    if event.id in processed_messages:
+        return
+    processed_messages.add(event.id)
+
     text = (event.message.text or "").lower()
 
     if any(k in text for k in KEYWORDS):
-        sender = await event.get_sender()
         chat = await event.get_chat()
 
         sender_name = getattr(sender, 'username', None) or getattr(sender, 'first_name', 'Unknown')
@@ -54,9 +64,7 @@ async def handler(event):
 async def main():
     log("Запуск Telegram клиента...")
     await client.start()
-
     send_bot_alert("✅ Бот успешно запущен и мониторит чаты!")
-
     log("Бот запущен, ждёт события...")
     await client.run_until_disconnected()
 
