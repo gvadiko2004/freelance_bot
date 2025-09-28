@@ -2,6 +2,7 @@
 # coding: utf-8
 """
 Телеграм-бот на Telethon: ищет ключевые слова в новых сообщениях и пересылает полный диалог.
+Разбивает длинные сообщения на части ≤ 4000 символов.
 После запуска отправляет тестовое сообщение о готовности.
 """
 
@@ -34,9 +35,14 @@ def log(msg):
     print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {msg}", flush=True)
 
 async def send_alert_text(text):
+    """
+    Отправка текста на ALERT_USER, разбивая длинные сообщения на куски ≤ 4000 символов
+    """
     try:
         entity = await tg_client.get_input_entity(ALERT_USER)
-        await tg_client.send_message(entity, text)
+        max_len = 4000  # Telegram ограничение
+        for i in range(0, len(text), max_len):
+            await tg_client.send_message(entity, text[i:i+max_len])
         log("Сообщение отправлено")
     except Exception as e:
         log(f"Ошибка при отправке сообщения: {e}")
