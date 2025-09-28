@@ -3,6 +3,7 @@
 
 import time
 import requests
+import asyncio
 from telethon import TelegramClient, events
 
 # ---------------- CONFIG ----------------
@@ -17,7 +18,7 @@ KEYWORDS = [k.lower() for k in [
     "магазин", "веб", "cms", "дизайн", "разработка"
 ]]
 
-CONTEXT_MESSAGES = 2  # Количество предыдущих сообщений для контекста
+CONTEXT_LIMIT = 5  # Количество последних сообщений для пересылки диалога
 
 # ---------------- INIT ----------------
 client = TelegramClient("session", API_ID, API_HASH)
@@ -37,16 +38,16 @@ def send_bot_alert(text):
     except Exception as e:
         log(f"Ошибка отправки через бота: {e}")
 
-async def get_context(event, limit=CONTEXT_MESSAGES):
-    """Возвращает последние N сообщений перед текущим для контекста"""
-    msgs = []
+async def get_full_dialog(event, limit=CONTEXT_LIMIT):
+    """Возвращает последние N сообщений для контекста/диалога"""
+    messages = []
     try:
         async for msg in client.iter_messages(event.chat_id, limit=limit, reverse=True):
             sender_name = getattr(msg.sender, 'username', None) or getattr(msg.sender, 'first_name', 'Unknown')
-            msgs.append(f"{sender_name}: {msg.text or ''}")
+            messages.append(f"{sender_name}: {msg.text or ''}")
     except Exception as e:
-        msgs.append(f"[Не удалось получить контекст: {e}]")
-    return "\n".join(msgs)
+        messages.append(f"[Ошибка получения диалога: {e}]")
+    return "\n".join(messages)
 
 # ---------------- MAIN HANDLER ----------------
 @client.on(events.NewMessage)
@@ -56,27 +57,26 @@ async def handler(event):
     if sender.is_self:
         return
 
-    # Уникальный идентификатор: chat_id + message_id
+    # Уникальный ключ для предотвращения дубликатов
     message_key = (event.chat_id, event.id)
     if message_key in processed_messages:
         return
     processed_messages.add(message_key)
 
     text = (event.message.text or "").lower()
-
     if any(k in text for k in KEYWORDS):
         chat = await event.get_chat()
-        sender_name = getattr(sender, 'username', None) or getattr(sender, 'first_name', 'Unknown')
         chat_name = getattr(chat, 'title', 'Личный чат')
+        sender_name = getattr(sender, 'username', None) or getattr(sender, 'first_name', 'Unknown')
 
-        context_text = await get_context(event, CONTEXT_MESSAGES)
-        alert_text = f"⚡ Найдено сообщение:\nЧат: {chat_name}\nОт: {sender_name}\n\nКонтекст:\n{context_text}\n\nСообщение:\n{text}"
+        # Получаем весь диалог (последние CONTEXT_LIMIT сообщений)
+        dialog = await get_full_dialog(event, CONTEXT_LIMIT)
+        alert_text = f"⚡ Найден диалог с ключевым словом:\nЧат: {chat_name}\nОт: {sender_name}\n\n{dialog}"
 
         log(f"⚡ Найдено ключевое слово в '{chat_name}' от {sender_name}")
         send_bot_alert(alert_text)
 
 # ---------------- HEARTBEAT ----------------
-import asyncio
 async def heartbeat():
     while True:
         log("Бот жив и работает...")
@@ -88,10 +88,10 @@ async def main():
     await client.start()
     send_bot_alert("✅ Бот успешно запущен и мониторит чаты!")
 
-    # Запускаем heartbeat параллельно
+    # Запускаем heartbeat
     asyncio.create_task(heartbeat())
 
-    log("Бот запущен, ждёт события...")
+    log("Бот запущен, ждёт новых сообщений...")
     await client.run_until_disconnected()
 
 if __name__ == "__main__":
