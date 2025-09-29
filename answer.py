@@ -1,14 +1,16 @@
 import asyncio
-from telethon import TelegramClient, events
+from telethon import TelegramClient, events, Button
 from telegram import Bot
 
 # ===== Настройки =====
 api_id = 21882740
 api_hash = "c80a68894509d01a93f5acfeabfdd922"
-SESSION_NAME = "session"  # для Telethon
+SESSION_NAME = "session"
 
 BOT_TOKEN = "6566504110:AAFK9hA4jxZ0eA7KZGhVvPe8mL2HZj2tQmE"
 ALERT_CHAT_ID = 1168962519  # твой Telegram ID
+
+TARGET_USERNAME = "achie_81"  # пользователь, чьи сообщения слушаем
 
 KEYWORDS = [
     "#html_и_css_верстка",
@@ -22,11 +24,9 @@ KEYWORDS = [kw.lower() for kw in KEYWORDS]
 
 # ===== Инициализация бота =====
 alert_bot = Bot(token=BOT_TOKEN)
-
-# ===== Telethon клиент =====
 client = TelegramClient(SESSION_NAME, api_id, api_hash)
 
-# ===== Функция отправки уведомлений =====
+# ===== Отправка уведомлений =====
 async def send_alert(text):
     try:
         await alert_bot.send_message(chat_id=ALERT_CHAT_ID, text=text)
@@ -34,13 +34,36 @@ async def send_alert(text):
     except Exception as e:
         print(f"[ERROR] Не удалось отправить сообщение: {e}")
 
+# ===== Извлечение ссылок из текста =====
+def extract_links(text):
+    import re
+    return re.findall(r'https?://[^\s]+', text)
+
 # ===== Обработка новых сообщений =====
-@client.on(events.NewMessage)
+@client.on(events.NewMessage(chats=TARGET_USERNAME))
 async def handler(event):
     text = (event.message.text or "").lower()
+    buttons = event.message.buttons or []
+
+    # Проверяем ключевые слова
     if any(k in text for k in KEYWORDS):
-        msg = f"🔔 Новое сообщение с ключевым словом:\n{text}"
-        await send_alert(msg)
+        msg_text = f"🔔 Новое сообщение с ключевым словом:\n{text}"
+        await send_alert(msg_text)
+
+    # Если есть кнопки — проверяем и получаем ссылки
+    for row in buttons:
+        for button in row:
+            if isinstance(button, Button):
+                try:
+                    # Нажимаем кнопку
+                    response = await event.click(button)
+                    # Получаем текст/ссылку из нового сообщения
+                    links = extract_links(response.text or "")
+                    if links:
+                        for link in links:
+                            await send_alert(f"🔗 Ссылка с кнопки:\n{link}")
+                except Exception as e:
+                    print(f"[ERROR] Не удалось нажать кнопку: {e}")
 
 # ===== Запуск =====
 async def main():
