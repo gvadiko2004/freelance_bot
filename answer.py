@@ -1,5 +1,6 @@
 import asyncio
-from telethon import TelegramClient, events
+import re
+from telethon import TelegramClient, events, Button
 from telegram import Bot
 
 # ===== Настройки =====
@@ -10,7 +11,7 @@ SESSION_NAME = "session"
 BOT_TOKEN = "6566504110:AAFK9hA4jxZ0eA7KZGhVvPe8mL2HZj2tQmE"
 ALERT_CHAT_ID = 1168962519  # твой Telegram ID
 
-TARGET_USERNAME = "achie_81"  # пользователь/чат, откуда берём сообщения
+TARGET_USERNAME = "achie_81"  # пользователь, чьи сообщения слушаем
 
 KEYWORDS = [
     "#html_и_css_верстка",
@@ -22,39 +23,55 @@ KEYWORDS = [
 ]
 KEYWORDS = [kw.lower() for kw in KEYWORDS]
 
-# ===== Инициализация бота =====
+# ===== Инициализация =====
 alert_bot = Bot(token=BOT_TOKEN)
 client = TelegramClient(SESSION_NAME, api_id, api_hash)
 
-# ===== Функция пересылки =====
+# ===== Функции =====
 async def send_alert(text):
     try:
         await alert_bot.send_message(chat_id=ALERT_CHAT_ID, text=text)
-        print("[INFO] Сообщение переслано через бот")
+        print(f"[INFO] Сообщение отправлено:\n{text}")
     except Exception as e:
-        print(f"[ERROR] Не удалось переслать сообщение: {e}")
+        print(f"[ERROR] Не удалось отправить сообщение: {e}")
 
-# ===== Обработка новых сообщений =====
+def extract_links(text):
+    return re.findall(r'https?://[^\s]+', text)
+
+async def process_buttons(event):
+    """Обрабатываем кнопки в сообщении и извлекаем ссылки из ответов"""
+    buttons = event.message.buttons or []
+    for row in buttons:
+        for button in row:
+            if isinstance(button, Button):
+                try:
+                    # Нажимаем кнопку
+                    response = await event.click(button)
+                    if response and response.text:
+                        links = extract_links(response.text)
+                        if links:
+                            for link in links:
+                                await send_alert(f"🔗 Ссылка с кнопки:\n{link}")
+                except Exception as e:
+                    print(f"[ERROR] Не удалось нажать кнопку: {e}")
+
+# ===== Обработчик новых сообщений =====
 @client.on(events.NewMessage(chats=TARGET_USERNAME))
 async def handler(event):
-    message = event.message
-    text = message.text or ""
-    
-    # Проверка ключевых слов
-    if any(k in text.lower() for k in KEYWORDS):
-        # Собираем текст сообщения
-        output_text = f"🔔 Новое сообщение:\n\n{text}"
-        # Добавляем ссылку на сообщение в Telegram
-        output_text += f"\n\nСсылка на сообщение: https://t.me/{TARGET_USERNAME}/{message.id}"
-        
-        # Отправляем через бот
-        await send_alert(output_text)
+    text = (event.message.text or "").lower()
+
+    # Проверяем ключевые слова
+    if any(k in text for k in KEYWORDS):
+        await send_alert(f"🔔 Новое сообщение с ключевым словом:\n{event.message.text}")
+
+        # Если есть кнопки — обрабатываем их
+        await process_buttons(event)
 
 # ===== Запуск =====
 async def main():
     print("✅ Бот запущен. Ожидание новых сообщений...")
-    await send_alert("✅ Бот успешно запущен и готов к работе!")
     await client.start()
+    await send_alert("✅ Бот успешно запущен и готов к работе!")
     await client.run_until_disconnected()
 
 if __name__ == "__main__":
