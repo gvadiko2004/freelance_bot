@@ -4,12 +4,12 @@ import asyncio
 # ===== НАСТРОЙКИ =====
 api_id = 21882740
 api_hash = "c80a68894509d01a93f5acfeabfdd922"
-PHONE_NUMBER = "+380634646075"  # Авторизация как пользователь
+PHONE_NUMBER = "+380634646075"
 
 BOT_TOKEN = "6566504110:AAFK9hA4jxZ0eA7KZGhVvPe8mL2HZj2tQmE"
-ALERT_CHAT_ID = 1168962519  # Твой личный Telegram ID
+ALERT_CHAT_ID = 1168962519
 
-SOURCE_CHAT = "FreelancehuntProjects"  # Канал, который слушаем
+SOURCE_CHAT = "FreelancehuntProjects"
 
 KEYWORDS = [
     "#html_и_css_верстка",
@@ -25,7 +25,7 @@ KEYWORDS = [k.lower() for k in KEYWORDS]
 user_client = TelegramClient("user_session", api_id, api_hash)
 bot_client = TelegramClient("bot_session", api_id, api_hash)
 
-# ===== Проверка сообщения и пересылка =====
+# ===== Проверка и пересылка =====
 async def check_and_forward(message):
     text = (message.text or "").lower()
     if any(k in text for k in KEYWORDS):
@@ -35,24 +35,27 @@ async def check_and_forward(message):
         except Exception as e:
             print(f"[ERROR FORWARDING] {e}")
 
-# ===== Реальный мониторинг канала =====
+# ===== Обработчик новых сообщений =====
 @user_client.on(events.NewMessage(chats=SOURCE_CHAT))
 async def handler(event):
     await check_and_forward(event.message)
 
 # ===== Основная функция =====
 async def main():
+    # Авторизация
     await user_client.start(phone=PHONE_NUMBER)
     await bot_client.start(bot_token=BOT_TOKEN)
     print("✅ USER и BOT авторизованы")
 
+    # Тест: последние 3 сообщения
     print("🔍 Тест — беру последние 3 сообщения...")
-    async for msg in user_client.get_messages(SOURCE_CHAT, limit=3):
+    messages = await user_client.get_messages(SOURCE_CHAT, limit=3)
+    for msg in messages:
         await check_and_forward(msg)
 
     print("👁 Теперь слушаю новые сообщения...")
     await user_client.run_until_disconnected()
 
-# ===== ЗАПУСК =====
+# ===== Запуск без asyncio.run() =====
 loop = asyncio.get_event_loop()
 loop.run_until_complete(main())
