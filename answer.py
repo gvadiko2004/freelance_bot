@@ -47,15 +47,15 @@ async def main():
     await bot_client.start(bot_token=BOT_TOKEN)
     print("✅ USER и BOT авторизованы")
 
-    # Тест: последние 3 сообщения
-    print("🔍 Тест — беру последние 3 сообщения...")
-    messages = await user_client.get_messages(SOURCE_CHAT, limit=3)
+    # Тест: последние 10 сообщений
+    print("🔍 Тест — беру последние 10 сообщений...")
+    messages = await user_client.get_messages(SOURCE_CHAT, limit=10)
     for msg in messages:
         await check_and_forward(msg)
 
     print("👁 Теперь слушаю новые сообщения...")
     await user_client.run_until_disconnected()
 
-# ===== Запуск без asyncio.run() =====
+# ===== Запуск =====
 loop = asyncio.get_event_loop()
 loop.run_until_complete(main())
