@@ -6,9 +6,7 @@ api_id = 21882740
 api_hash = "c80a68894509d01a93f5acfeabfdd922"
 PHONE_NUMBER = "+380634646075"
 
-BOT_TOKEN = "6566504110:AAFK9hA4jxZ0eA7KZGhVvPe8mL2HZj2tQmE"
 ALERT_CHAT_ID = 1168962519
-
 SOURCE_CHAT = "FreelancehuntProjects"
 
 KEYWORDS = [
@@ -21,16 +19,16 @@ KEYWORDS = [
 ]
 KEYWORDS = [k.lower() for k in KEYWORDS]
 
-# ===== Клиенты =====
+# ===== Клиент User =====
 user_client = TelegramClient("user_session", api_id, api_hash)
-bot_client = TelegramClient("bot_session", api_id, api_hash)
 
 # ===== Проверка и пересылка =====
 async def check_and_forward(message):
     text = (message.text or "").lower()
     if any(k in text for k in KEYWORDS):
         try:
-            await bot_client.forward_messages(ALERT_CHAT_ID, message)
+            # Пересылаем через UserClient напрямую
+            await user_client.forward_messages(ALERT_CHAT_ID, message)
             print(f"[FORWARDED] {text[:50]}...")
         except Exception as e:
             print(f"[ERROR FORWARDING] {e}")
@@ -42,10 +40,8 @@ async def handler(event):
 
 # ===== Основная функция =====
 async def main():
-    # Авторизация
     await user_client.start(phone=PHONE_NUMBER)
-    await bot_client.start(bot_token=BOT_TOKEN)
-    print("✅ USER и BOT авторизованы")
+    print("✅ USER авторизован")
 
     # Тест: последние 10 сообщений
     print("🔍 Тест — беру последние 10 сообщений...")
