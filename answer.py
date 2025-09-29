@@ -1,12 +1,16 @@
-from telethon import TelegramClient, events
+from telethon import TelegramClient, events, Button
 import asyncio
+import re
+import requests
 
 # ===== НАСТРОЙКИ =====
 api_id = 21882740
 api_hash = "c80a68894509d01a93f5acfeabfdd922"
 PHONE_NUMBER = "+380634646075"
 
-ALERT_CHAT_ID = 1168962519  # Твой Telegram ID
+BOT_TOKEN = "6566504110:AAFK9hA4jxZ0eA7KZGhVvPe8mL2HZj2tQmE"
+ALERT_CHAT_ID = 1168962519  # Куда шлём сообщения
+
 SOURCE_CHAT = "FreelancehuntProjects"
 
 KEYWORDS = [
@@ -22,17 +26,42 @@ KEYWORDS = [k.lower() for k in KEYWORDS]
 # ===== Клиент User =====
 user_client = TelegramClient("user_session", api_id, api_hash)
 
+# ===== Функция отправки через Bot API =====
+def send_to_bot(text):
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    data = {"chat_id": ALERT_CHAT_ID, "text": text, "disable_web_page_preview": False}
+    try:
+        requests.post(url, data=data)
+    except Exception as e:
+        print(f"[ERROR BOT SEND] {e}")
+
+# ===== Извлечение ссылок =====
+def extract_links(text):
+    return re.findall(r'https?://[^\s]+', text or "")
+
 # ===== Проверка и пересылка =====
 async def check_and_forward(message):
     text = message.text or ""
     lower_text = text.lower()
+
     if any(k in lower_text for k in KEYWORDS):
-        try:
-            # Пересылаем именно как пересланное сообщение
-            await user_client.forward_messages(ALERT_CHAT_ID, message)
-            print(f"[FORWARDED] {text[:50]}...")
-        except Exception as e:
-            print(f"[ERROR FORWARDING] {e}")
+        # Отправка текста
+        send_to_bot(f"🔔 Новое сообщение:\n{text}")
+
+        # Извлечение ссылок из текста
+        links = extract_links(text)
+        for link in links:
+            send_to_bot(f"🔗 Ссылка из текста:\n{link}")
+
+        # Проверка кнопок (InlineKeyboard)
+        buttons = message.buttons or []
+        for row in buttons:
+            for button in row:
+                if isinstance(button, Button):
+                    # Если это URL кнопка
+                    if hasattr(button, 'url') and button.url:
+                        send_to_bot(f"🔗 Ссылка с кнопки:\n{button.url}")
+        print(f"[SENT TO BOT] {text[:50]}...")
 
 # ===== Обработчик новых сообщений =====
 @user_client.on(events.NewMessage(chats=SOURCE_CHAT))
