@@ -1,6 +1,7 @@
 import asyncio
 import re
 import requests
+from bs4 import BeautifulSoup
 from telethon import TelegramClient, events, Button
 from telethon.sessions import StringSession
 
@@ -25,10 +26,9 @@ KEYWORDS = [
 KEYWORDS = [k.lower() for k in KEYWORDS]
 
 # ===== Клиент User =====
-# StringSession чтобы избежать блокировки sqlite
 user_client = TelegramClient(StringSession(), api_id, api_hash)
 
-# ===== Отправка в Bot API =====
+# ===== Отправка сообщений в бота =====
 def send_to_bot(text):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     data = {"chat_id": ALERT_CHAT_ID, "text": text, "disable_web_page_preview": False}
@@ -37,11 +37,21 @@ def send_to_bot(text):
     except Exception as e:
         print(f"[ERROR BOT SEND] {e}")
 
-# ===== Извлечение ссылок =====
+# ===== Извлечение ссылок из текста =====
 def extract_links(text):
     return re.findall(r'https?://[^\s]+', text or "")
 
-# ===== Проверка и пересылка =====
+# ===== Получение title страницы =====
+def get_page_title(url):
+    try:
+        response = requests.get(url, timeout=5)
+        soup = BeautifulSoup(response.text, "html.parser")
+        title = soup.title.string.strip() if soup.title else "Без заголовка"
+        return title
+    except Exception as e:
+        return f"[Ошибка при получении title: {e}]"
+
+# ===== Обработка сообщения =====
 async def check_and_forward(message):
     text = message.text or ""
     lower_text = text.lower()
@@ -53,13 +63,17 @@ async def check_and_forward(message):
         # Ссылки из текста
         for link in extract_links(text):
             send_to_bot(f"🔗 Ссылка из текста:\n{link}")
+            page_title = get_page_title(link)
+            send_to_bot(f"📝 Title страницы:\n{page_title}")
 
         # Ссылки из кнопок
         buttons = message.buttons or []
         for row in buttons:
             for button in row:
                 if isinstance(button, Button) and hasattr(button, "url") and button.url:
-                    send_to_bot(f"🔗 Ссылка с кнопки:\n{button.url}")
+                    send_to_bot(f"🔘 Ссылка с кнопки:\n{button.url}")
+                    page_title = get_page_title(button.url)
+                    send_to_bot(f"📝 Title страницы:\n{page_title}")
 
         print(f"[SENT TO BOT] {text[:50]}...")
 
@@ -68,18 +82,18 @@ async def check_and_forward(message):
 async def handler(event):
     await check_and_forward(event.message)
 
-# ===== Основная функция =====
+# ===== Основной запуск =====
 async def main():
     await user_client.start(phone=PHONE_NUMBER)
     print("✅ USER авторизован")
 
-    # Тестовые последние 10 сообщений
-    print("🔍 Тест — беру последние 10 сообщений...")
+    # Тест: последние 10 сообщений
+    print("🔍 Загружаю последние 10 сообщений...")
     messages = await user_client.get_messages(SOURCE_CHAT, limit=10)
     for msg in messages:
         await check_and_forward(msg)
 
-    print("👁 Теперь слушаю новые сообщения...")
+    print("👁 Ожидание новых сообщений...")
     await user_client.run_until_disconnected()
 
 # ===== Запуск =====
