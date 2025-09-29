@@ -1,58 +1,58 @@
-import asyncio
 from telethon import TelegramClient, events
+import asyncio
 
-# ===== ТВОИ ДАННЫЕ =====
+# ===== НАСТРОЙКИ =====
 api_id = 21882740
 api_hash = "c80a68894509d01a93f5acfeabfdd922"
-PHONE_NUMBER = "+380634646075"  # авторизация как пользователь
+PHONE_NUMBER = "+380634646075"  # Авторизация как пользователь
 
 BOT_TOKEN = "6566504110:AAFK9hA4jxZ0eA7KZGhVvPe8mL2HZj2tQmE"
-ALERT_CHAT_ID = 1168962519  # твой Telegram ID
+ALERT_CHAT_ID = 1168962519  # Твой личный Telegram ID
 
-SOURCE_CHAT = "FreelancehuntProjects"  # канал, который слушаем
+SOURCE_CHAT = "FreelancehuntProjects"  # Канал, который слушаем
 
 KEYWORDS = [
-    "wordpress", "верстка", "лендинг", "сайт", 
-    "figma", "html", "css", "shopify"
+    "#html_и_css_верстка",
+    "#веб_программирование",
+    "#cms",
+    "#интернет_магазины_и_электронная_коммерция",
+    "#создание_сайта_под_ключ",
+    "#дизайн_сайтов"
 ]
 KEYWORDS = [k.lower() for k in KEYWORDS]
 
-# ===== Telethon User Client =====
+# ===== Клиенты =====
 user_client = TelegramClient("user_session", api_id, api_hash)
-bot_client = TelegramClient("bot_session", api_id, api_hash).start(bot_token=BOT_TOKEN)
+bot_client = TelegramClient("bot_session", api_id, api_hash)
 
-# ===== Функция проверки и пересылки =====
+# ===== Проверка сообщения и пересылка =====
 async def check_and_forward(message):
     text = (message.text or "").lower()
     if any(k in text for k in KEYWORDS):
         try:
             await bot_client.forward_messages(ALERT_CHAT_ID, message)
-            print(f"[TEST-FORWARD] Переслано: {text[:50]}...")
+            print(f"[FORWARDED] {text[:50]}...")
         except Exception as e:
-            print(f"[ERROR] Не удалось переслать: {e}")
+            print(f"[ERROR FORWARDING] {e}")
 
-# ===== LIVE Обработчик =====
+# ===== Реальный мониторинг канала =====
 @user_client.on(events.NewMessage(chats=SOURCE_CHAT))
 async def handler(event):
     await check_and_forward(event.message)
 
-# ===== Тестовый запуск =====
-async def test_run():
-    print("🔍 Тест — беру последние 3 сообщения из канала...")
+# ===== Основная функция =====
+async def main():
+    await user_client.start(phone=PHONE_NUMBER)
+    await bot_client.start(bot_token=BOT_TOKEN)
+    print("✅ USER и BOT авторизованы")
+
+    print("🔍 Тест — беру последние 3 сообщения...")
     async for msg in user_client.get_messages(SOURCE_CHAT, limit=3):
         await check_and_forward(msg)
 
-# ===== Запуск =====
-async def main():
-    print("✅ Запуск...")
-    await user_client.start(phone=PHONE_NUMBER)
-    print("👤 USER авторизован")
-    print("🤖 BOT авторизован")
-
-    # Тестовый режим
-    await test_run()
-    print("⏳ Теперь бот слушает новые сообщения...")
-
+    print("👁 Теперь слушаю новые сообщения...")
     await user_client.run_until_disconnected()
 
-asyncio.run(main())
+# ===== ЗАПУСК =====
+loop = asyncio.get_event_loop()
+loop.run_until_complete(main())
