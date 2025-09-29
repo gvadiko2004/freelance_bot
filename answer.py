@@ -25,6 +25,7 @@ KEYWORDS = [
 KEYWORDS = [k.lower() for k in KEYWORDS]
 
 # ===== Клиент User =====
+# StringSession чтобы избежать блокировки sqlite
 user_client = TelegramClient(StringSession(), api_id, api_hash)
 
 # ===== Отправка в Bot API =====
@@ -65,16 +66,20 @@ async def check_and_forward(message):
 # ===== Обработчик новых сообщений =====
 @user_client.on(events.NewMessage(chats=SOURCE_CHAT))
 async def handler(event):
-    # Каждое новое сообщение пересылаем
     await check_and_forward(event.message)
 
 # ===== Основная функция =====
 async def main():
     await user_client.start(phone=PHONE_NUMBER)
     print("✅ USER авторизован")
-    print("👁 Теперь слушаю только новые сообщения...")
 
-    # Слушаем новые сообщения
+    # Тестовые последние 10 сообщений
+    print("🔍 Тест — беру последние 10 сообщений...")
+    messages = await user_client.get_messages(SOURCE_CHAT, limit=10)
+    for msg in messages:
+        await check_and_forward(msg)
+
+    print("👁 Теперь слушаю новые сообщения...")
     await user_client.run_until_disconnected()
 
 # ===== Запуск =====
