@@ -75,7 +75,7 @@ async def main():
 
     # Тестовые последние 10 сообщений
     print("🔍 Тест — беру последние 10 сообщений...")
-    messages = await user_client.get_messages(SOURCE_CHAT, limit=10)
+    messages = await user_client.get_messages(SOURCE_CHAT, limit=50)
     for msg in messages:
         await check_and_forward(msg)
 
