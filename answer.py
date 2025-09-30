@@ -57,16 +57,13 @@ async def check_and_forward(message):
     lower_text = text.lower()
 
     if any(k in lower_text for k in KEYWORDS):
-        # Отправка текста
         send_to_bot(f"🔔 Новое сообщение:\n{text}")
 
-        # Ссылки из текста
         for link in extract_links(text):
             send_to_bot(f"🔗 Ссылка из текста:\n{link}")
             page_title = get_page_title(link)
             send_to_bot(f"📝 Title страницы:\n{page_title}")
 
-        # Ссылки из кнопок
         buttons = message.buttons or []
         for row in buttons:
             for button in row:
@@ -82,25 +79,33 @@ async def check_and_forward(message):
 async def handler(event):
     await check_and_forward(event.message)
 
-# ===== Основной запуск =====
+# ===== Основной запуск с уведомлением =====
 async def main():
     await user_client.start(phone=PHONE_NUMBER)
     print("✅ USER авторизован")
+    send_to_bot("✅ Бот запущен и слушает канал!")
 
-    # Тест: последние 10 сообщений
-    print("🔍 Загружаю последние 10 сообщений...")
-    messages = await user_client.get_messages(SOURCE_CHAT, limit=10)
-    for msg in messages:
-        await check_and_forward(msg)
+    try:
+        print("🔍 Загружаю последние 10 сообщений...")
+        messages = await user_client.get_messages(SOURCE_CHAT, limit=10)
+        for msg in messages:
+            await check_and_forward(msg)
 
-    print("👁 Ожидание новых сообщений...")
-    await user_client.run_until_disconnected()
+        print("👁 Ожидание новых сообщений...")
+        await user_client.run_until_disconnected()
+
+    except Exception as e:
+        send_to_bot(f"❌ Бот упал с ошибкой:\n{e}")
+
+    finally:
+        send_to_bot("⚠️ Бот остановлен или отключён!")
+        print("🔒 Отключение клиента...")
+        await user_client.disconnect()
 
 # ===== Запуск =====
 if __name__ == "__main__":
     loop = asyncio.get_event_loop()
     try:
         loop.run_until_complete(main())
-    finally:
-        print("🔒 Отключение клиента...")
-        loop.run_until_complete(user_client.disconnect())
+    except Exception as e:
+        send_to_bot(f"🔥 Критическая ошибка запуска:\n{e}")
