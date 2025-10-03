@@ -1,9 +1,10 @@
 import asyncio
 import re
 import requests
+import os
+import sys
 from bs4 import BeautifulSoup
 from telethon import TelegramClient, events, Button
-from telethon.sessions import StringSession
 
 # ===== НАСТРОЙКИ =====
 api_id = 21882740
@@ -25,8 +26,11 @@ KEYWORDS = [
 ]
 KEYWORDS = [k.lower() for k in KEYWORDS]
 
-# ===== Клиент User =====
-user_client = TelegramClient(StringSession(), api_id, api_hash)
+SESSION_FILE = "user_session.session"
+RESTART_INTERVAL = 20 * 60  # 20 минут
+
+# ===== Клиент =====
+user_client = TelegramClient(SESSION_FILE, api_id, api_hash)
 
 # ===== Отправка сообщений в бота =====
 def send_to_bot(text):
@@ -37,11 +41,11 @@ def send_to_bot(text):
     except Exception as e:
         print(f"[ERROR BOT SEND] {e}")
 
-# ===== Извлечение ссылок из текста =====
+# ===== Извлечение ссылок =====
 def extract_links(text):
     return re.findall(r'https?://[^\s]+', text or "")
 
-# ===== Получение title страницы =====
+# ===== Title страницы =====
 def get_page_title(url):
     try:
         response = requests.get(url, timeout=5)
@@ -49,7 +53,7 @@ def get_page_title(url):
         title = soup.title.string.strip() if soup.title else "Без заголовка"
         return title
     except Exception as e:
-        return f"[Ошибка при получении title: {e}]"
+        return f"[Ошибка title: {e}]"
 
 # ===== Обработка сообщения =====
 async def check_and_forward(message):
@@ -60,52 +64,41 @@ async def check_and_forward(message):
         send_to_bot(f"🔔 Новое сообщение:\n{text}")
 
         for link in extract_links(text):
-            send_to_bot(f"🔗 Ссылка из текста:\n{link}")
-            page_title = get_page_title(link)
-            send_to_bot(f"📝 Title страницы:\n{page_title}")
+            send_to_bot(f"🔗 Ссылка:\n{link}")
+            send_to_bot(f"📝 Title:\n{get_page_title(link)}")
 
-        buttons = message.buttons or []
-        for row in buttons:
-            for button in row:
-                if isinstance(button, Button) and hasattr(button, "url") and button.url:
-                    send_to_bot(f"🔘 Ссылка с кнопки:\n{button.url}")
-                    page_title = get_page_title(button.url)
-                    send_to_bot(f"📝 Title страницы:\n{page_title}")
+        if message.buttons:
+            for row in message.buttons:
+                for button in row:
+                    if isinstance(button, Button) and getattr(button, "url", None):
+                        send_to_bot(f"🔘 Кнопка:\n{button.url}")
+                        send_to_bot(f"📝 Title:\n{get_page_title(button.url)}")
 
-        print(f"[SENT TO BOT] {text[:50]}...")
-
-# ===== Обработчик новых сообщений =====
 @user_client.on(events.NewMessage(chats=SOURCE_CHAT))
 async def handler(event):
     await check_and_forward(event.message)
 
-# ===== Основной запуск с уведомлением =====
+# ===== Авто-перезапуск =====
+async def auto_restart():
+    while True:
+        await asyncio.sleep(RESTART_INTERVAL)
+        send_to_bot("♻️ Перезапуск бота через 20 минут!")
+        await user_client.disconnect()
+        os.execv(sys.executable, ['python'] + sys.argv)
+
+# ===== Основной запуск =====
 async def main():
     await user_client.start(phone=PHONE_NUMBER)
-    print("✅ USER авторизован")
-    send_to_bot("✅ Бот запущен и слушает канал!")
+    send_to_bot("✅ Бот запущен и работает!")
 
-    try:
-        print("🔍 Загружаю последние 10 сообщений...")
-        messages = await user_client.get_messages(SOURCE_CHAT, limit=10)
-        for msg in messages:
-            await check_and_forward(msg)
+    asyncio.create_task(auto_restart())
 
-        print("👁 Ожидание новых сообщений...")
-        await user_client.run_until_disconnected()
+    messages = await user_client.get_messages(SOURCE_CHAT, limit=10)
+    for msg in messages:
+        await check_and_forward(msg)
 
-    except Exception as e:
-        send_to_bot(f"❌ Бот упал с ошибкой:\n{e}")
-
-    finally:
-        send_to_bot("⚠️ Бот остановлен или отключён!")
-        print("🔒 Отключение клиента...")
-        await user_client.disconnect()
+    await user_client.run_until_disconnected()
 
 # ===== Запуск =====
 if __name__ == "__main__":
-    loop = asyncio.get_event_loop()
-    try:
-        loop.run_until_complete(main())
-    except Exception as e:
-        send_to_bot(f"🔥 Критическая ошибка запуска:\n{e}")
+    asyncio.run(main())
