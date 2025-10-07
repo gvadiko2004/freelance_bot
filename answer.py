@@ -2,15 +2,14 @@ import asyncio
 import re
 import requests
 import os
+import sys
 from bs4 import BeautifulSoup
 from telethon import TelegramClient, events, Button
-from telethon.errors import SessionPasswordNeededError
 
 # ===== НАСТРОЙКИ =====
 api_id = 21882740
 api_hash = "c80a68894509d01a93f5acfeabfdd922"
 PHONE_NUMBER = "+380634646075"
-PASSWORD_2FA = "gvadiko2004"
 
 BOT_TOKEN = "6566504110:AAFK9hA4jxZ0eA7KZGhVvPe8mL2HZj2tQmE"
 ALERT_CHAT_ID = 1168962519
@@ -30,11 +29,10 @@ KEYWORDS = [k.lower() for k in KEYWORDS]
 SESSION_FILE = "user_session.session"
 RESTART_INTERVAL = 20 * 60  # 20 минут
 
-# ===== Клиенты =====
+# ===== Клиент =====
 user_client = TelegramClient(SESSION_FILE, api_id, api_hash)
-bot_client = TelegramClient("bot_session", api_id, api_hash).start(bot_token=BOT_TOKEN)
 
-# ===== Отправка сообщений в бот =====
+# ===== Отправка сообщений в бота =====
 def send_to_bot(text):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     data = {"chat_id": ALERT_CHAT_ID, "text": text, "disable_web_page_preview": False}
@@ -57,7 +55,7 @@ def get_page_title(url):
     except Exception as e:
         return f"[Ошибка title: {e}]"
 
-# ===== Обработка сообщений канала =====
+# ===== Обработка сообщения =====
 async def check_and_forward(message):
     text = message.text or ""
     lower_text = text.lower()
@@ -86,21 +84,15 @@ async def auto_restart():
         await asyncio.sleep(RESTART_INTERVAL)
         send_to_bot("♻️ Перезапуск бота через 20 минут!")
         await user_client.disconnect()
-        os.execv(sys.executable, ['python'] + os.sys.argv)
+        os.execv(sys.executable, ['python'] + sys.argv)
 
 # ===== Основной запуск =====
 async def main():
-    # Старый способ: start с callback для кода
-    await user_client.start(
-        phone=PHONE_NUMBER,
-        password=PASSWORD_2FA,
-        code_callback=lambda: input("Введите код, который прислал Telegram: ")
-    )
-    send_to_bot("✅ Бот запущен и авторизован!")
+    await user_client.start(phone=PHONE_NUMBER)
+    send_to_bot("✅ Бот запущен и работает!")
 
     asyncio.create_task(auto_restart())
 
-    # Проверка последних сообщений
     messages = await user_client.get_messages(SOURCE_CHAT, limit=10)
     for msg in messages:
         await check_and_forward(msg)
@@ -109,5 +101,4 @@ async def main():
 
 # ===== Запуск =====
 if __name__ == "__main__":
-    print("Бот запускается и автоматически получит код Telegram...")
     asyncio.run(main())
