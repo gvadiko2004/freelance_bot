@@ -10,7 +10,7 @@ from telethon import TelegramClient, events, Button
 api_id = 21882740
 api_hash = "c80a68894509d01a93f5acfeabfdd922"
 PHONE_NUMBER = "+380634646075"
-PASSWORD_2FA = "gvadiko2004"  # пароль двухфакторки
+PASSWORD_2FA = "gvadiko2004"
 
 BOT_TOKEN = "6566504110:AAFK9hA4jxZ0eA7KZGhVvPe8mL2HZj2tQmE"
 ALERT_CHAT_ID = 1168962519
@@ -34,7 +34,7 @@ RESTART_INTERVAL = 20 * 60  # 20 минут
 user_client = TelegramClient(SESSION_FILE, api_id, api_hash)
 bot_client = TelegramClient("bot_session", api_id, api_hash).start(bot_token=BOT_TOKEN)
 
-# ===== Отправка сообщений в бота =====
+# ===== Отправка сообщений =====
 def send_to_bot(text):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     data = {"chat_id": ALERT_CHAT_ID, "text": text, "disable_web_page_preview": False}
@@ -84,23 +84,20 @@ async def auto_restart():
         await user_client.disconnect()
         os.execv(sys.executable, ['python'] + sys.argv)
 
-# ===== Получение кода из сообщений =====
-async def get_code_from_messages(client):
-    messages = await client.get_messages('me', limit=10)
-    for msg in messages:
-        text = msg.message or ""
-        match = re.search(r'Код для входа в Telegram:\s*(\d+)', text)
-        if match:
-            return match.group(1)
-    return None
-
 # ===== Основной мониторинг =====
-async def start_monitoring():
-    # Старт клиента с автоматическим вводом кода и пароля
+async def start_monitoring(phone_code=None):
+    async def code_callback():
+        # Ждём пока пользователь через бот отправит код
+        while not start_monitoring.code_value:
+            await asyncio.sleep(1)
+        return start_monitoring.code_value
+
+    start_monitoring.code_value = phone_code
+
     await user_client.start(
         phone=PHONE_NUMBER,
         password=lambda: PASSWORD_2FA,
-        phone_code_callback=lambda: asyncio.get_event_loop().run_until_complete(get_code_from_messages(user_client))
+        phone_code_callback=code_callback
     )
 
     send_to_bot("✅ Бот запущен и работает!")
@@ -113,18 +110,23 @@ async def start_monitoring():
 
     await user_client.run_until_disconnected()
 
+# ===== Переменная для хранения кода =====
+start_monitoring.code_value = None
+
 # ===== Команда /start api =====
 @bot_client.on(events.NewMessage(pattern="/start api"))
 async def start_command(event):
-    await event.respond("🚀 Запуск бота...")
-    # Проверяем, чтобы не запускать несколько раз
-    if not getattr(start_command, "running", False):
-        start_command.running = True
-        asyncio.create_task(start_monitoring())
-    else:
-        await event.respond("Бот уже запущен!")
+    await event.respond("🚀 Запуск бота! Пожалуйста, отправьте код, который пришёл в Telegram в формате /code 12345")
+
+# ===== Команда /code 12345 =====
+@bot_client.on(events.NewMessage(pattern=r"/code (\d+)"))
+async def code_command(event):
+    code = event.pattern_match.group(1)
+    start_monitoring.code_value = code
+    await event.respond(f"✅ Код получен: {code}. Продолжаем авторизацию...")
+    asyncio.create_task(start_monitoring(phone_code=code))
 
 # ===== Запуск бота =====
 if __name__ == "__main__":
-    print("Бот запущен, ждём команду /start api...")
+    print("Бот запущен, ждём команду /start api и код подтверждения...")
     bot_client.run_until_disconnected()
