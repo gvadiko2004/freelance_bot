@@ -29,8 +29,9 @@ KEYWORDS = [k.lower() for k in KEYWORDS]
 SESSION_FILE = "user_session.session"
 RESTART_INTERVAL = 20 * 60  # 20 минут
 
-# ===== Клиент =====
+# ===== Клиенты =====
 user_client = TelegramClient(SESSION_FILE, api_id, api_hash)
+bot_client = TelegramClient("bot_session", api_id, api_hash).start(bot_token=BOT_TOKEN)
 
 # ===== Отправка сообщений в бота =====
 def send_to_bot(text):
@@ -74,11 +75,7 @@ async def check_and_forward(message):
                         send_to_bot(f"🔘 Кнопка:\n{button.url}")
                         send_to_bot(f"📝 Title:\n{get_page_title(button.url)}")
 
-@user_client.on(events.NewMessage(chats=SOURCE_CHAT))
-async def handler(event):
-    await check_and_forward(event.message)
-
-# ===== Авто-перезапуск =====
+# ===== Перезапуск =====
 async def auto_restart():
     while True:
         await asyncio.sleep(RESTART_INTERVAL)
@@ -86,8 +83,8 @@ async def auto_restart():
         await user_client.disconnect()
         os.execv(sys.executable, ['python'] + sys.argv)
 
-# ===== Основной запуск =====
-async def main():
+# ===== Основной функционал =====
+async def start_monitoring():
     await user_client.start(phone=PHONE_NUMBER)
     send_to_bot("✅ Бот запущен и работает!")
 
@@ -99,6 +96,13 @@ async def main():
 
     await user_client.run_until_disconnected()
 
-# ===== Запуск =====
+# ===== Обработка команды /start api =====
+@bot_client.on(events.NewMessage(pattern="/start api"))
+async def start_command(event):
+    await event.respond("🚀 Запуск бота...")
+    asyncio.create_task(start_monitoring())
+
+# ===== Запуск бота =====
 if __name__ == "__main__":
-    asyncio.run(main())
+    print("Бот запущен, ждём команду /start api...")
+    bot_client.run_until_disconnected()
