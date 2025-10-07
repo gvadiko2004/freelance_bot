@@ -10,6 +10,7 @@ from telethon import TelegramClient, events, Button
 api_id = 21882740
 api_hash = "c80a68894509d01a93f5acfeabfdd922"
 PHONE_NUMBER = "+380634646075"
+PASSWORD_2FA = "gvadiko2004"  # пароль двухфакторки
 
 BOT_TOKEN = "6566504110:AAFK9hA4jxZ0eA7KZGhVvPe8mL2HZj2tQmE"
 ALERT_CHAT_ID = 1168962519
@@ -56,7 +57,7 @@ def get_page_title(url):
     except Exception as e:
         return f"[Ошибка title: {e}]"
 
-# ===== Обработка сообщения =====
+# ===== Обработка сообщений =====
 async def check_and_forward(message):
     text = message.text or ""
     lower_text = text.lower()
@@ -75,7 +76,7 @@ async def check_and_forward(message):
                         send_to_bot(f"🔘 Кнопка:\n{button.url}")
                         send_to_bot(f"📝 Title:\n{get_page_title(button.url)}")
 
-# ===== Перезапуск =====
+# ===== Авто-перезапуск =====
 async def auto_restart():
     while True:
         await asyncio.sleep(RESTART_INTERVAL)
@@ -83,9 +84,25 @@ async def auto_restart():
         await user_client.disconnect()
         os.execv(sys.executable, ['python'] + sys.argv)
 
-# ===== Основной функционал =====
+# ===== Получение кода из сообщений =====
+async def get_code_from_messages(client):
+    messages = await client.get_messages('me', limit=10)
+    for msg in messages:
+        text = msg.message or ""
+        match = re.search(r'Код для входа в Telegram:\s*(\d+)', text)
+        if match:
+            return match.group(1)
+    return None
+
+# ===== Основной мониторинг =====
 async def start_monitoring():
-    await user_client.start(phone=PHONE_NUMBER)
+    # Старт клиента с автоматическим вводом кода и пароля
+    await user_client.start(
+        phone=PHONE_NUMBER,
+        password=lambda: PASSWORD_2FA,
+        phone_code_callback=lambda: asyncio.get_event_loop().run_until_complete(get_code_from_messages(user_client))
+    )
+
     send_to_bot("✅ Бот запущен и работает!")
 
     asyncio.create_task(auto_restart())
@@ -96,11 +113,16 @@ async def start_monitoring():
 
     await user_client.run_until_disconnected()
 
-# ===== Обработка команды /start api =====
+# ===== Команда /start api =====
 @bot_client.on(events.NewMessage(pattern="/start api"))
 async def start_command(event):
     await event.respond("🚀 Запуск бота...")
-    asyncio.create_task(start_monitoring())
+    # Проверяем, чтобы не запускать несколько раз
+    if not getattr(start_command, "running", False):
+        start_command.running = True
+        asyncio.create_task(start_monitoring())
+    else:
+        await event.respond("Бот уже запущен!")
 
 # ===== Запуск бота =====
 if __name__ == "__main__":
