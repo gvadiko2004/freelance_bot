@@ -1,10 +1,9 @@
 import asyncio
 import re
 import requests
-import os
-import sys
 from bs4 import BeautifulSoup
 from telethon import TelegramClient, events, Button
+from telethon.errors import SessionPasswordNeededError
 
 # ===== НАСТРОЙКИ =====
 api_id = 21882740
@@ -82,51 +81,48 @@ async def auto_restart():
         await asyncio.sleep(RESTART_INTERVAL)
         send_to_bot("♻️ Перезапуск бота через 20 минут!")
         await user_client.disconnect()
+        import os, sys
         os.execv(sys.executable, ['python'] + sys.argv)
 
-# ===== Основной мониторинг =====
-async def start_monitoring(phone_code=None):
-    async def code_callback():
-        # Ждём пока пользователь через бот отправит код
-        while not start_monitoring.code_value:
-            await asyncio.sleep(1)
-        return start_monitoring.code_value
-
-    start_monitoring.code_value = phone_code
-
-    await user_client.start(
-        phone=PHONE_NUMBER,
-        password=lambda: PASSWORD_2FA,
-        phone_code_callback=code_callback
-    )
-
-    send_to_bot("✅ Бот запущен и работает!")
-
+# ===== Авторизация через код и пароль =====
+async def authorize(code: str):
+    await user_client.connect()
+    if not await user_client.is_user_authorized():
+        await user_client.send_code_request(PHONE_NUMBER)
+        try:
+            await user_client.sign_in(PHONE_NUMBER, code)
+        except SessionPasswordNeededError:
+            await user_client.sign_in(password=PASSWORD_2FA)
+    send_to_bot("✅ Авторизация выполнена!")
     asyncio.create_task(auto_restart())
 
-    messages = await user_client.get_messages(SOURCE_CHAT, limit=10)
-    for msg in messages:
-        await check_and_forward(msg)
+    # запускаем мониторинг
+    asyncio.create_task(start_monitoring_loop())
 
+# ===== Мониторинг канала =====
+async def start_monitoring_loop():
     await user_client.run_until_disconnected()
 
-# ===== Переменная для хранения кода =====
-start_monitoring.code_value = None
+@user_client.on(events.NewMessage(chats=SOURCE_CHAT))
+async def channel_handler(event):
+    await check_and_forward(event.message)
+
+# ===== Переменная для кода =====
+authorization_code = None
 
 # ===== Команда /start api =====
 @bot_client.on(events.NewMessage(pattern="/start api"))
 async def start_command(event):
-    await event.respond("🚀 Запуск бота! Пожалуйста, отправьте код, который пришёл в Telegram в формате /code 12345")
+    await event.respond("🚀 Запуск бота! Отправьте код из Telegram в формате /code 12345")
 
 # ===== Команда /code 12345 =====
 @bot_client.on(events.NewMessage(pattern=r"/code (\d+)"))
 async def code_command(event):
     code = event.pattern_match.group(1)
-    start_monitoring.code_value = code
-    await event.respond(f"✅ Код получен: {code}. Продолжаем авторизацию...")
-    asyncio.create_task(start_monitoring(phone_code=code))
+    await event.respond(f"Код получен: {code}. Авторизация...")
+    await authorize(code)
 
 # ===== Запуск бота =====
 if __name__ == "__main__":
-    print("Бот запущен, ждём команду /start api и код подтверждения...")
+    print("Бот запущен, ждём /start api и код подтверждения...")
     bot_client.run_until_disconnected()
