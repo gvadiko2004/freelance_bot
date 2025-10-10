@@ -26,12 +26,11 @@ KEYWORDS = [
 ]
 KEYWORDS = [k.lower() for k in KEYWORDS]
 
-SESSION_FILE = "user_session.session"
 RESTART_INTERVAL = 20 * 60  # 20 минут
 TERMINAL_SECRET = "run_server_code"  # код для запуска команд на VPS
 
 # ===== Клиент =====
-user_client = TelegramClient(SESSION_FILE, API_ID, API_HASH)
+user_client = TelegramClient("freelance_user", API_ID, API_HASH)
 
 # ===== Отправка сообщений в бота =====
 def send_to_bot(text: str):
