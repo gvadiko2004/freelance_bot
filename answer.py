@@ -2,7 +2,6 @@ import asyncio
 import re
 import requests
 import os
-import sys
 from bs4 import BeautifulSoup
 from telethon import TelegramClient, events, Button
 
@@ -110,10 +109,8 @@ async def main():
     print("Бот запускается...")
     send_to_bot("✅ Бот запущен и работает!")
 
-    # Обработка последних сообщений при старте
-    messages = await bot_client.get_messages(SOURCE_CHAT, limit=10)
-    for msg in messages:
-        await check_and_forward(msg)
+    # НЕ используем get_messages(), бот не может читать историю
+    # Обработка всех новых сообщений будет через обработчики событий
 
     await bot_client.run_until_disconnected()
 
