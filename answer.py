@@ -9,11 +9,9 @@ from telethon import TelegramClient, events, Button
 # ===== НАСТРОЙКИ =====
 API_ID = 21882740
 API_HASH = "c80a68894509d01a93f5acfeabfdd922"
-PHONE_NUMBER = "+380634646075"
-
 BOT_TOKEN = "6566504110:AAFK9hA4jxZ0eA7KZGhVvPe8mL2HZj2tQmE"
-ALERT_CHAT_ID = 1168962519  # куда бот шлет уведомления (можно свой ID)
 
+ALERT_CHAT_ID = 1168962519  # куда бот шлёт уведомления
 SOURCE_CHAT = "FreelancehuntProjects"
 
 KEYWORDS = [
@@ -28,8 +26,8 @@ KEYWORDS = [k.lower() for k in KEYWORDS]
 
 TERMINAL_SECRET = "run_server_code"  # код для запуска команд на VPS
 
-# ===== Клиент =====
-user_client = TelegramClient("freelance_user", API_ID, API_HASH)
+# ===== Клиент бота =====
+bot_client = TelegramClient('bot_session', API_ID, API_HASH).start(bot_token=BOT_TOKEN)
 
 # ===== Функции =====
 def send_to_bot(text: str):
@@ -42,11 +40,9 @@ def send_to_bot(text: str):
         print(f"[ERROR BOT SEND] {e}")
 
 def extract_links(text: str):
-    """Возвращает все ссылки из текста"""
     return re.findall(r'https?://[^\s]+', text or "")
 
 def get_page_title(url: str) -> str:
-    """Возвращает title страницы по ссылке"""
     try:
         response = requests.get(url, timeout=5)
         soup = BeautifulSoup(response.text, "html.parser")
@@ -55,7 +51,6 @@ def get_page_title(url: str) -> str:
         return f"[Ошибка title: {e}]"
 
 def execute_command(cmd: str) -> str:
-    """Выполняет команду на сервере и возвращает вывод"""
     try:
         output = os.popen(cmd).read()
         return output if output else "Команда выполнена, но вывода нет."
@@ -75,7 +70,6 @@ async def check_and_forward(message):
             send_to_bot(f"🔗 Ссылка:\n{link}")
             send_to_bot(f"📝 Title:\n{get_page_title(link)}")
 
-        # Проверка кнопок с URL
         if message.buttons:
             for row in message.buttons:
                 for button in row:
@@ -94,34 +88,36 @@ async def check_and_forward(message):
             send_to_bot("❌ Команда не указана после секрета.")
 
 # ===== Обработчик новых сообщений из SOURCE_CHAT =====
-@user_client.on(events.NewMessage(chats=SOURCE_CHAT))
-async def handler(event):
+@bot_client.on(events.NewMessage(chats=SOURCE_CHAT))
+async def source_handler(event):
     await check_and_forward(event.message)
 
-# ===== Обработчик команд /start и /reload =====
-@user_client.on(events.NewMessage(chats=ALERT_CHAT_ID))
-async def command_handler(event):
-    text = (event.raw_text or "").strip().lower()
+# ===== Обработчик команд боту (@iliarchie_bot) =====
+@bot_client.on(events.NewMessage(pattern=r"^/(start|reload)$"))
+async def bot_command_handler(event):
+    command = event.raw_text.strip().lower()
+    user_id = event.sender_id
 
-    if text == "/start":
-        send_to_bot("✅ Бот запущен и мониторит сообщения!")
+    # Отправляем ответ пользователю, который прислал команду
+    if command == "/start":
+        await bot_client.send_message(user_id, "✅ Бот запущен и мониторит сообщения!")
+    
+    elif command == "/reload":
+        await bot_client.send_message(user_id, "♻ Перезагружаюсь...")
+        os.execv(sys.executable, ['python'] + sys.argv)
 
-    elif text == "/reload":
-        send_to_bot("♻ Перезагружаюсь...")
-        os.execv(sys.executable, ['python'] + sys.argv)  # Полный рестарт скрипта
-
-# ===== Основной запуск бота =====
+# ===== Основной запуск =====
 async def main():
-    await user_client.start(phone=PHONE_NUMBER)
+    print("Бот запускается...")
     send_to_bot("✅ Бот запущен и работает!")
-
+    
     # Обработка последних сообщений при старте
-    messages = await user_client.get_messages(SOURCE_CHAT, limit=10)
+    messages = await bot_client.get_messages(SOURCE_CHAT, limit=10)
     for msg in messages:
         await check_and_forward(msg)
 
-    await user_client.run_until_disconnected()
+    await bot_client.run_until_disconnected()
 
-# ===== Запуск =====
+# ===== Запуск скрипта =====
 if __name__ == "__main__":
     asyncio.run(main())
