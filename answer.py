@@ -26,7 +26,6 @@ KEYWORDS = [
 ]
 KEYWORDS = [k.lower() for k in KEYWORDS]
 
-RESTART_INTERVAL = 20 * 60  # 20 минут
 TERMINAL_SECRET = "run_server_code"  # код для запуска команд на VPS
 
 # ===== Клиент =====
@@ -102,21 +101,10 @@ async def check_and_forward(message):
 async def handler(event):
     await check_and_forward(event.message)
 
-# ===== Авто-перезапуск бота =====
-async def auto_restart():
-    while True:
-        await asyncio.sleep(RESTART_INTERVAL)
-        send_to_bot("♻️ Перезапуск бота через 20 минут!")
-        await user_client.disconnect()
-        os.execv(sys.executable, ['python'] + sys.argv)
-
 # ===== Основной запуск бота =====
 async def main():
     await user_client.start(phone=PHONE_NUMBER)
     send_to_bot("✅ Бот запущен и работает!")
-
-    # Перезапуск в фоне
-    asyncio.create_task(auto_restart())
 
     # Обработка последних сообщений
     messages = await user_client.get_messages(SOURCE_CHAT, limit=10)
