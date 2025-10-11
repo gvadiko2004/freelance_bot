@@ -93,16 +93,15 @@ async def source_handler(event):
     await check_and_forward(event.message)
 
 # ===== Обработчик команд боту (@iliarchie_bot) =====
-@bot_client.on(events.NewMessage(pattern=r"^/(start|reload)$"))
+@bot_client.on(events.NewMessage)
 async def bot_command_handler(event):
-    command = event.raw_text.strip().lower()
     user_id = event.sender_id
+    text = (event.raw_text or "").strip().lower()
 
-    # Отправляем ответ пользователю, который прислал команду
-    if command == "/start":
+    if text == "/start":
         await bot_client.send_message(user_id, "✅ Бот запущен и мониторит сообщения!")
     
-    elif command == "/reload":
+    elif text == "/reload":
         await bot_client.send_message(user_id, "♻ Перезагружаюсь...")
         os.execv(sys.executable, ['python'] + sys.argv)
 
@@ -110,7 +109,7 @@ async def bot_command_handler(event):
 async def main():
     print("Бот запускается...")
     send_to_bot("✅ Бот запущен и работает!")
-    
+
     # Обработка последних сообщений при старте
     messages = await bot_client.get_messages(SOURCE_CHAT, limit=10)
     for msg in messages:
@@ -118,6 +117,7 @@ async def main():
 
     await bot_client.run_until_disconnected()
 
-# ===== Запуск скрипта =====
+# ===== Запуск скрипта для Python 3.12 =====
 if __name__ == "__main__":
-    asyncio.run(main())
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(main())
