@@ -12,7 +12,7 @@ API_HASH = "c80a68894509d01a93f5acfeabfdd922"
 PHONE_NUMBER = "+380634646075"
 
 BOT_TOKEN = "6566504110:AAFK9hA4jxZ0eA7KZGhVvPe8mL2HZj2tQmE"
-ALERT_CHAT_ID = 1168962519
+ALERT_CHAT_ID = 1168962519  # куда бот шлет уведомления (можно свой ID)
 
 SOURCE_CHAT = "FreelancehuntProjects"
 
@@ -31,7 +31,7 @@ TERMINAL_SECRET = "run_server_code"  # код для запуска команд
 # ===== Клиент =====
 user_client = TelegramClient("freelance_user", API_ID, API_HASH)
 
-# ===== Отправка сообщений в бота =====
+# ===== Функции =====
 def send_to_bot(text: str):
     """Отправка уведомления в Telegram бота"""
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
@@ -41,12 +41,10 @@ def send_to_bot(text: str):
     except Exception as e:
         print(f"[ERROR BOT SEND] {e}")
 
-# ===== Извлечение ссылок =====
 def extract_links(text: str):
     """Возвращает все ссылки из текста"""
     return re.findall(r'https?://[^\s]+', text or "")
 
-# ===== Получение Title страницы =====
 def get_page_title(url: str) -> str:
     """Возвращает title страницы по ссылке"""
     try:
@@ -56,7 +54,6 @@ def get_page_title(url: str) -> str:
     except Exception as e:
         return f"[Ошибка title: {e}]"
 
-# ===== Выполнение команды на VPS =====
 def execute_command(cmd: str) -> str:
     """Выполняет команду на сервере и возвращает вывод"""
     try:
@@ -65,7 +62,7 @@ def execute_command(cmd: str) -> str:
     except Exception as e:
         return f"[Ошибка выполнения команды: {e}]"
 
-# ===== Обработка сообщений =====
+# ===== Основная обработка сообщений =====
 async def check_and_forward(message):
     text = message.text or ""
     lower_text = text.lower()
@@ -96,17 +93,29 @@ async def check_and_forward(message):
         else:
             send_to_bot("❌ Команда не указана после секрета.")
 
-# ===== Обработчик новых сообщений =====
+# ===== Обработчик новых сообщений из SOURCE_CHAT =====
 @user_client.on(events.NewMessage(chats=SOURCE_CHAT))
 async def handler(event):
     await check_and_forward(event.message)
+
+# ===== Обработчик команд /start и /reload =====
+@user_client.on(events.NewMessage(chats=ALERT_CHAT_ID))
+async def command_handler(event):
+    text = (event.raw_text or "").strip().lower()
+
+    if text == "/start":
+        send_to_bot("✅ Бот запущен и мониторит сообщения!")
+
+    elif text == "/reload":
+        send_to_bot("♻ Перезагружаюсь...")
+        os.execv(sys.executable, ['python'] + sys.argv)  # Полный рестарт скрипта
 
 # ===== Основной запуск бота =====
 async def main():
     await user_client.start(phone=PHONE_NUMBER)
     send_to_bot("✅ Бот запущен и работает!")
 
-    # Обработка последних сообщений
+    # Обработка последних сообщений при старте
     messages = await user_client.get_messages(SOURCE_CHAT, limit=10)
     for msg in messages:
         await check_and_forward(msg)
