@@ -1,6 +1,3 @@
-
-
-
 import asyncio
 import re
 import requests
@@ -118,4 +115,10 @@ async def main():
 
 # ===== Запуск =====
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except Exception as e:
+        send_to_bot(f"❌ Бот упал с ошибкой:\n{e}")
+        raise
+    finally:
+        send_to_bot("⚠️ Бот завершил работу. Пожалуйста, запустите его заново через start.")
